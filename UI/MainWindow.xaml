@@ -217,6 +217,7 @@
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnLoadDemo" Content="Demo" Style="{StaticResource BtnGhost}" Margin="0,0,8,0"/>
+          <Button x:Name="BtnClearDemo" Content="Clear" Style="{StaticResource BtnGhost}" Margin="0,0,8,0"/>
           <Button x:Name="BtnStartScan" Content="Run scan" Style="{StaticResource BtnPrimary}" Margin="0,0,8,0"/>
           <Button x:Name="BtnCancelScan" Content="Stop" Style="{StaticResource BtnDanger}" Visibility="Collapsed"/>
         </StackPanel>

@@ -46,8 +46,19 @@ function Show-ETMMainWindow {
         lastResult  = $null
         cancelScan  = $false
         scanRunning = $false
+        isDemo      = $false
+        scanJob     = $null
+        scanTimer   = $null
+        cancelSync  = $null
         discoveryRows = @()
         apiFields   = @{}
+    }
+
+    # Brush helper in this window scope so WPF click handlers can always find it.
+    $UiBrush = {
+        param([Parameter(Mandatory)][string]$Hex)
+        [System.Windows.Media.SolidColorBrush]::new(
+            ([System.Windows.Media.ColorConverter]::ConvertFromString($Hex)))
     }
 
     function Show-Page {
@@ -158,6 +169,49 @@ function Show-ETMMainWindow {
         Apply-DiscoveryFilter
     }
 
+    function Reset-DashboardUi {
+        param([string]$StatusText = 'Dashboard cleared. Set a target and run a scan.')
+        $state.lastResult = $null
+        $state.isDemo = $false
+        (& $get 'TxtScore').Text = '--'
+        (& $get 'TxtGrade').Text = ''
+        (& $get 'TxtFindingCount').Text = '0'
+        (& $get 'TxtAssetCount').Text = '0'
+        (& $get 'TxtIntelCount').Text = '0'
+        (& $get 'GridFindings').ItemsSource = @()
+        (& $get 'GridIntel').ItemsSource = @()
+        $state.discoveryRows = @()
+        (& $get 'GridDiscovery').ItemsSource = @()
+        (& $get 'TxtStatus').Text = $StatusText
+        (& $get 'ScanProgress').Value = 0
+        (& $get 'TxtProgressMsg').Text = ''
+    }
+
+    function Stop-ActiveScan {
+        param([string]$Reason = 'Scan stopped.')
+        $state.cancelScan = $true
+        if ($state.cancelSync) { $state.cancelSync.Cancel = $true }
+        if ($state.scanTimer) {
+            try { $state.scanTimer.Stop() } catch { }
+            $state.scanTimer = $null
+        }
+        if ($state.scanJob) {
+            try {
+                Stop-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue
+                Remove-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue
+            }
+            catch { }
+            $state.scanJob = $null
+        }
+        $state.scanRunning = $false
+        (& $get 'ScanProgress').Visibility = 'Collapsed'
+        (& $get 'ScanProgress').Value = 0
+        (& $get 'TxtProgressMsg').Visibility = 'Collapsed'
+        (& $get 'BtnCancelScan').Visibility = 'Collapsed'
+        (& $get 'TxtStatus').Text = $Reason
+        Append-LogUi $Reason
+    }
+
     function Show-AuthorizationPrompt {
         $msg = @"
 External Threat Mapper uses passive and authorized defensive reconnaissance only.
@@ -210,9 +264,9 @@ Do you confirm authorization?
         $pwd = New-Object System.Windows.Controls.PasswordBox
         $pwd.Height = 32
         $pwd.Margin = '0,0,0,8'
-        $pwd.Background = New-ETMUiBrush '#0A0E14'
-        $pwd.Foreground = New-ETMUiBrush '#EEF2F8'
-        $pwd.BorderBrush = New-ETMUiBrush '#263041'
+        $pwd.Background = & $UiBrush '#0A0E14'
+        $pwd.Foreground = & $UiBrush '#EEF2F8'
+        $pwd.BorderBrush = & $UiBrush '#263041'
         $existing = Get-ETMApiSecret -Name $Provider.id
         if ($existing) { $pwd.Tag = 'configured' }
         $row = New-Object System.Windows.Controls.StackPanel
@@ -242,7 +296,7 @@ Do you confirm authorization?
             $sec = $pwd.SecurePassword
             if ($sec.Length -eq 0) {
                 $status.Text = 'Paste an API key first.'
-                $status.Foreground = New-ETMUiBrush '#F0B429'
+                $status.Foreground = & $UiBrush '#F0B429'
                 return
             }
             $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
@@ -256,7 +310,7 @@ Do you confirm authorization?
                 $pwd.Clear()
             }
             $status.Text = 'Saved securely.'
-            $status.Foreground = New-ETMUiBrush '#3DD68C'
+            $status.Foreground = & $UiBrush '#3DD68C'
             Append-LogUi "API key saved: $providerId"
         }.GetNewClosure()
         Register-ETMUiClick -Control $btnTest -Context "Test API $providerId" -OnLog $logFn -Handler {
@@ -270,15 +324,15 @@ Do you confirm authorization?
             }
             elseif (-not $stored) {
                 $status.Text = 'No API key configured. Enter a key above, then Test or Save.'
-                $status.Foreground = New-ETMUiBrush '#F0B429'
+                $status.Foreground = & $UiBrush '#F0B429'
                 Append-LogUi "[$providerId] Skipped - no key."
                 return
             }
             $status.Text = 'Testing connection...'
-            $status.Foreground = New-ETMUiBrush '#F0B429'
+            $status.Foreground = & $UiBrush '#F0B429'
             $t = Test-ETMApiConnection -Provider $providerId
             $status.Text = $t.Message
-            $status.Foreground = if ($t.Ok) { New-ETMUiBrush '#3DD68C' } else { New-ETMUiBrush '#F85149' }
+            $status.Foreground = if ($t.Ok) { & $UiBrush '#3DD68C' } else { & $UiBrush '#F85149' }
             Append-LogUi "[$providerId] $($t.Message)"
         }.GetNewClosure()
         [void]$row.Children.Add($btnSave)
@@ -358,12 +412,18 @@ Do you confirm authorization?
             return
         }
         $demo = Import-ETMScanResultJson -Path $demoPath
+        $state.isDemo = $true
         Update-Ui $demo
-        $demoScope = New-ETMScopeObject -PrimaryDomain 'demo-corp.example' -OrganizationName 'Demo' -AuthorizationAcknowledged $true
-        Save-ETMScanHistory -Result $demo -Scope $demoScope | Out-Null
-        Refresh-HistoryGrid
-        (& $get 'TxtStatus').Text = 'Demo dataset loaded and saved to history.'
-        Append-LogUi 'Demo data loaded.'
+        (& $get 'TxtOrg').Text = 'Demo Corp'
+        (& $get 'TxtDomain').Text = 'demo-corp.example'
+        (& $get 'ChkAuthorized').IsChecked = $true
+        (& $get 'TxtStatus').Text = 'Demo data loaded (sample only). Run a real scan to replace it.'
+        Append-LogUi 'Demo data loaded (not saved to history).'
+    }
+
+    Register-ETMUiClick -Control (& $get 'BtnClearDemo') -Context 'Clear dashboard' -OnLog $uiLog -Handler {
+        Reset-DashboardUi -StatusText 'Dashboard cleared.'
+        Append-LogUi 'Dashboard cleared.'
     }
 
     Register-ETMUiClick -Control (& $get 'BtnLoadHistory') -Context 'Load history scan' -OnLog $uiLog -Handler {
@@ -448,7 +508,7 @@ Do you confirm authorization?
             if ($state.apiFields.ContainsKey($r.id)) {
                 $st = $state.apiFields[$r.id].Status
                 $st.Text = $r.message
-                $st.Foreground = if ($r.ok) { New-ETMUiBrush '#3DD68C' } else { New-ETMUiBrush '#F85149' }
+                $st.Foreground = if ($r.ok) { & $UiBrush '#3DD68C' } else { & $UiBrush '#F85149' }
             }
             Append-LogUi "[$($r.id)] $($r.message)"
         }
@@ -462,24 +522,39 @@ Do you confirm authorization?
             Show-Page 'Target'
             return
         }
+        if ($scope.primaryDomain -match 'demo-corp\.example') {
+            [System.Windows.MessageBox]::Show(
+                'Enter your real target domain on the Target page (demo domain is for sample data only).',
+                'Scan', 'OK', 'Information') | Out-Null
+            Show-Page 'Target'
+            return
+        }
         if (-not $scope.authorizationAcknowledged) {
             if (-not (Show-AuthorizationPrompt)) { return }
             $scope.authorizationAcknowledged = $true
         }
+
+        if ($state.isDemo -or $state.lastResult) {
+            Reset-DashboardUi -StatusText "Starting scan of $($scope.primaryDomain)..."
+        }
+        $state.isDemo = $false
+
         $state.scanRunning = $true
         $state.cancelScan = $false
+        $state.cancelSync = [hashtable]::Synchronized(@{ Cancel = $false })
         (& $get 'ScanProgress').Visibility = 'Visible'
         (& $get 'TxtProgressMsg').Visibility = 'Visible'
         (& $get 'BtnCancelScan').Visibility = 'Visible'
-        (& $get 'ScanProgress').Value = 0
+        (& $get 'ScanProgress').Value = 2
+        (& $get 'TxtProgressMsg').Text = 'Starting scan (API keys optional for basic checks)...'
         (& $get 'TxtStatus').Text = "Scanning $($scope.primaryDomain)..."
-        Append-LogUi "Scan started [$($scope.scanMode)]."
+        Append-LogUi "Scan started [$($scope.scanMode)]. Basic checks work without API keys."
 
         $root = Get-ETMProjectRoot
-        $prog = [hashtable]::Synchronized(@{ pct = 0; msg = '' })
-        $cancelRef = [ref]$false
+        $prog = [hashtable]::Synchronized(@{ pct = 2; msg = 'Starting...' })
+        $cancelSync = $state.cancelSync
         $startJob = {
-            param($Root, $Scope, $Config, $CancelRef, $Prog)
+            param($Root, $Scope, $Config, $Cancel, $Prog)
             $ErrorActionPreference = 'Stop'
             Import-Module (Join-Path $Root 'ExternalThreatMapper.psm1') -Force
             $cb = {
@@ -487,27 +562,36 @@ Do you confirm authorization?
                 $Prog.pct = $p
                 $Prog.msg = $m
             }
-            Start-ETMExternalScan -Scope $Scope -Config $Config -ProgressCallback $cb -CancelFlag $CancelRef
+            Start-ETMExternalScan -Scope $Scope -Config $Config -ProgressCallback $cb -CancelFlag $Cancel
         }
         if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-            $job = Start-ThreadJob -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelRef, $prog
+            $state.scanJob = Start-ThreadJob -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog
         }
         else {
-            $job = Start-Job -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelRef, $prog
+            $state.scanJob = Start-Job -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog
         }
 
-        $timer = New-Object System.Windows.Threading.DispatcherTimer
-        $timer.Interval = [TimeSpan]::FromMilliseconds(350)
-        $timer.Add_Tick({
+        $state.scanTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $state.scanTimer.Interval = [TimeSpan]::FromMilliseconds(350)
+        $state.scanTimer.Add_Tick({
             try {
                 if ($prog.msg) {
                     (& $get 'TxtProgressMsg').Text = $prog.msg
                     (& $get 'ScanProgress').Value = [Math]::Min(99, [double]$prog.pct)
                 }
+                $job = $state.scanJob
+                if (-not $job) { return }
+
+                if ($state.cancelScan -or ($state.cancelSync -and $state.cancelSync.Cancel)) {
+                    Stop-ActiveScan -Reason "Scan cancelled for $($scope.primaryDomain)."
+                    return
+                }
+
                 if ($job.State -eq 'Completed') {
-                    $timer.Stop()
+                    $state.scanTimer.Stop()
                     $result = Receive-Job $job -ErrorAction SilentlyContinue
                     Remove-Job $job -Force -ErrorAction SilentlyContinue
+                    $state.scanJob = $null
                     $state.scanRunning = $false
                     (& $get 'ScanProgress').Value = 100
                     (& $get 'BtnCancelScan').Visibility = 'Collapsed'
@@ -515,42 +599,48 @@ Do you confirm authorization?
                         Update-Ui $result
                         $ic = (ConvertTo-ETMObjectList $result.threatIntel).Count
                         $fc = (ConvertTo-ETMObjectList $result.findings).Count
-                        (& $get 'TxtStatus').Text = "Complete - $fc findings, $ic intel rows."
+                        $sc = if ($result.score) { $result.score.TotalScore } else { '--' }
+                        (& $get 'TxtStatus').Text = "Complete - score $sc, $fc findings, $ic intel rows."
                         Append-LogUi 'Scan finished.'
                         Refresh-HistoryGrid
                         Show-Page 'Dashboard'
                     }
                     else {
-                        (& $get 'TxtStatus').Text = 'Scan finished with no data returned.'
-                        Append-LogUi 'Scan completed but result was empty.'
+                        (& $get 'TxtStatus').Text = 'Scan ended with no results (cancelled or no data).'
+                        Append-LogUi 'Scan ended with no result payload.'
                     }
                 }
-                elseif ($job.State -eq 'Failed') {
-                    $timer.Stop()
-                    $err = (Receive-Job $job 2>&1 | Out-String)
+                elseif ($job.State -in @('Failed', 'Stopped')) {
+                    $state.scanTimer.Stop()
+                    $err = (Receive-Job $job 2>&1 | Out-String).Trim()
                     Remove-Job $job -Force -ErrorAction SilentlyContinue
+                    $state.scanJob = $null
                     $state.scanRunning = $false
                     (& $get 'BtnCancelScan').Visibility = 'Collapsed'
-                    Append-LogUi "Scan error: $err"
-                    (& $get 'TxtStatus').Text = 'Scan failed - see Reports log.'
-                    [System.Windows.MessageBox]::Show(
-                        "Scan failed.`n`n$err",
-                        'Scan', 'OK', 'Warning') | Out-Null
+                    if ($state.cancelScan) {
+                        (& $get 'TxtStatus').Text = 'Scan stopped.'
+                        Append-LogUi 'Scan stopped by user.'
+                    }
+                    else {
+                        Append-LogUi "Scan error: $err"
+                        (& $get 'TxtStatus').Text = 'Scan failed - see Reports log.'
+                        [System.Windows.MessageBox]::Show(
+                            "Scan failed.`n`n$err",
+                            'Scan', 'OK', 'Warning') | Out-Null
+                    }
                 }
-                elseif ($state.cancelScan) { $cancelRef.Value = $true }
             }
             catch {
-                $timer.Stop()
-                $state.scanRunning = $false
+                Stop-ActiveScan -Reason 'Scan interrupted due to an error.'
                 Show-ETMUiError -Context 'Scan progress' -Exception $_.Exception -OnLog $uiLog
             }
         })
-        $timer.Start()
+        $state.scanTimer.Start()
     }
 
     Register-ETMUiClick -Control (& $get 'BtnCancelScan') -Context 'Cancel scan' -OnLog $uiLog -Handler {
-        $state.cancelScan = $true
-        Append-LogUi 'Cancel requested.'
+        if (-not $state.scanRunning) { return }
+        Stop-ActiveScan -Reason 'Stopping scan...'
     }
 
     Register-ETMUiClick -Control (& $get 'BtnExportHtml') -Context 'Export HTML' -OnLog $uiLog -Handler {

@@ -1,11 +1,19 @@
 # ScanOrchestrator.psm1 — coordinates passive/safe scan pipeline
 
+function Test-ETMScanCancelled {
+    param($CancelFlag)
+    if ($null -eq $CancelFlag) { return $false }
+    if ($CancelFlag -is [hashtable]) { return [bool]$CancelFlag.Cancel }
+    if ($CancelFlag -is [ref]) { return $CancelFlag.Value }
+    return $false
+}
+
 function Start-ETMExternalScan {
     param(
         [Parameter(Mandatory)][psobject]$Scope,
         [Parameter(Mandatory)][psobject]$Config,
         [scriptblock]$ProgressCallback,
-        [ref]$CancelFlag
+        $CancelFlag
     )
 
     $scanId = [guid]::NewGuid().ToString()
@@ -14,9 +22,9 @@ function Start-ETMExternalScan {
 
     $findings = [System.Collections.Generic.List[object]]::new()
 
-    & $ProgressCallback 5 'Discovering subdomains (passive)...'
-    if ($CancelFlag.Value) { return }
-    $subs = @(Invoke-ETMSubdomainDiscovery -Scope $Scope -Config $Config)
+    & $ProgressCallback 5 'Discovering subdomains (passive, no API key required)...'
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $subs = @(Invoke-ETMSubdomainDiscovery -Scope $Scope -Config $Config -CancelFlag $CancelFlag)
     Add-ETMSubdomainRecords -ScanId $scanId -Records $subs
 
     foreach ($s in $subs | Where-Object { $_.riskScore -ge 50 }) {
@@ -34,7 +42,8 @@ function Start-ETMExternalScan {
     }
 
     & $ProgressCallback 35 'Checking typosquat candidates...'
-    if (-not $CancelFlag.Value) {
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $typos = @(Invoke-ETMTyposquatCheck -Domain $Scope.primaryDomain)
         foreach ($t in $typos) {
             $findings.Add([pscustomobject]@{
@@ -52,7 +61,8 @@ function Start-ETMExternalScan {
     }
 
     & $ProgressCallback 55 'Cloud exposure indicators...'
-    if (-not $CancelFlag.Value -and $Scope.scanMode -ne 'PassiveOnly') {
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    if (-not (Test-ETMScanCancelled $CancelFlag) -and $Scope.scanMode -ne 'PassiveOnly') {
         $cloud = @(Invoke-ETMCloudExposureScan -Domain $Scope.primaryDomain)
         foreach ($c in $cloud) {
             $findings.Add([pscustomobject]@{
@@ -69,9 +79,10 @@ function Start-ETMExternalScan {
         }
     }
 
-    & $ProgressCallback 65 'Threat intelligence APIs (Shodan, VT, OTX...)...'
+    & $ProgressCallback 65 'Threat intel (skipped if no API keys)...'
     $intelRows = @()
-    if (-not $CancelFlag.Value) {
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
         $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips)
         $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows $intelRows)
@@ -79,7 +90,8 @@ function Start-ETMExternalScan {
     }
 
     & $ProgressCallback 75 'GitHub metadata search...'
-    if (-not $CancelFlag.Value) {
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $ghToken = Get-ETMApiSecret -Name 'GitHub'
         $gh = @(Invoke-ETMGitHubExposureSearch -Domain $Scope.primaryDomain -Token $ghToken)
         foreach ($g in $gh) {
@@ -99,7 +111,8 @@ function Start-ETMExternalScan {
 
     & $ProgressCallback 85 'Safe web probing...'
     $web = @()
-    if (-not $CancelFlag.Value) {
+    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $web = @(Invoke-ETMWebProbeBatch -Hostnames ($subs.hostname | Select-Object -First 15) -ScanMode $Scope.scanMode)
     }
 
@@ -131,4 +144,4 @@ function Start-ETMExternalScan {
     return $scanResult
 }
 
-Export-ModuleMember -Function 'Start-ETMExternalScan'
+Export-ModuleMember -Function 'Start-ETMExternalScan', 'Test-ETMScanCancelled'

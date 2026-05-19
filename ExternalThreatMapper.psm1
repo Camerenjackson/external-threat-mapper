@@ -33,4 +33,7 @@ foreach ($name in $moduleOrder) {
 . (Join-Path $script:ETMRoot 'UI\UiSafe.ps1')
 . (Join-Path $script:ETMRoot 'UI\MainWindow.ps1')
 
-Export-ModuleMember -Function 'Show-ETMMainWindow', 'Start-ETMExternalScan', 'Get-ETMAppConfig', 'Import-ETMScopeFile'
+Export-ModuleMember -Function @(
+    'Show-ETMMainWindow', 'Start-ETMExternalScan', 'Get-ETMAppConfig', 'Import-ETMScopeFile',
+    'New-ETMUiBrush', 'Register-ETMUiClick', 'Show-ETMUiError'
+)

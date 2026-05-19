@@ -3,7 +3,7 @@
 function Get-ETMSubdomainsFromCertificateTransparency {
     param(
         [Parameter(Mandatory)][string]$Domain,
-        [int]$TimeoutSec = 30
+        [int]$TimeoutSec = 20
     )
     $results = [System.Collections.Generic.List[object]]::new()
     try {
@@ -65,14 +65,21 @@ function Get-ETMSubdomainsFromDnsBruteforceLite {
 function Invoke-ETMSubdomainDiscovery {
     param(
         [Parameter(Mandatory)][psobject]$Scope,
-        [psobject]$Config
+        [psobject]$Config,
+        $CancelFlag
     )
     $domain = $Scope.primaryDomain
     $all = [System.Collections.Generic.List[object]]::new()
     $rate = if ($Config.application.rateLimitMs) { [int]$Config.application.rateLimitMs } else { 500 }
 
+    if (Get-Command Test-ETMScanCancelled -ErrorAction SilentlyContinue) {
+        if (Test-ETMScanCancelled $CancelFlag) { return @() }
+    }
     $ct = Get-ETMSubdomainsFromCertificateTransparency -Domain $domain
     if ($ct) { $all.AddRange($ct) }
+    if (Get-Command Test-ETMScanCancelled -ErrorAction SilentlyContinue) {
+        if (Test-ETMScanCancelled $CancelFlag) { return @($all) }
+    }
     if ($Scope.scanMode -ne 'PassiveOnly') {
         # Still DNS-only — not intrusive port scan
         $dnsLite = Get-ETMSubdomainsFromDnsBruteforceLite -Domain $domain -RateLimitMs $rate
