@@ -1,0 +1,29 @@
+# Runtime data
+data/*.db
+data/*.json
+!data/history/.gitkeep
+data/history/*
+!data/history/.gitkeep
+data/store/
+logs/*.log
+reports/*
+!reports/.gitkeep
+
+# Secrets — never commit
+config/config.json
+scopes/*.json
+!scopes/example-scope.json
+credentials/
+
+# Build / IDE
+dist/
+build/
+*.spec
+.vs/
+*.user
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.bak

@@ -1,0 +1,92 @@
+{
+  "providers": [
+    {
+      "id": "Shodan",
+      "displayName": "Shodan",
+      "description": "Internet-wide host and DNS intelligence for exposed services.",
+      "keyLocation": "Account -> https://account.shodan.io -> Main API Key (top of page).",
+      "docsUrl": "https://account.shodan.io/",
+      "envVars": ["ETM_SHODAN_API_KEY", "SHODAN_API_KEY"]
+    },
+    {
+      "id": "VirusTotal",
+      "displayName": "VirusTotal",
+      "description": "Domain and URL reputation from aggregated scanners.",
+      "keyLocation": "Profile icon -> API Key -> copy from https://www.virustotal.com/gui/my-apikey",
+      "docsUrl": "https://www.virustotal.com/gui/my-apikey",
+      "envVars": ["ETM_VIRUSTOTAL_API_KEY", "VT_API_KEY"]
+    },
+    {
+      "id": "SecurityTrails",
+      "displayName": "SecurityTrails",
+      "description": "Historical DNS and subdomain intelligence.",
+      "keyLocation": "SecurityTrails -> Account -> API -> API Keys -> copy key.",
+      "docsUrl": "https://securitytrails.com/corp/api",
+      "envVars": ["ETM_SECURITYTRAILS_API_KEY"]
+    },
+    {
+      "id": "Censys",
+      "displayName": "Censys",
+      "description": "Certificate and host visibility search (Search API v2).",
+      "keyLocation": "Censys Search -> Account -> API -> API ID (paste here).",
+      "docsUrl": "https://search.censys.io/account/api",
+      "envVars": ["ETM_CENSYS_API_ID", "CENSYS_API_ID"]
+    },
+    {
+      "id": "CensysSecret",
+      "displayName": "Censys API Secret",
+      "description": "Paired secret for Censys Search API v2.",
+      "keyLocation": "Same page as API ID -> copy Secret (second field).",
+      "docsUrl": "https://search.censys.io/account/api",
+      "envVars": ["ETM_CENSYS_API_SECRET", "CENSYS_API_SECRET"]
+    },
+    {
+      "id": "Urlscan",
+      "displayName": "urlscan.io",
+      "description": "Historical URL scan metadata for your domain.",
+      "keyLocation": "urlscan.io -> Settings -> API Keys -> Create / copy key.",
+      "docsUrl": "https://urlscan.io/user/profile/",
+      "envVars": ["ETM_URLSCAN_API_KEY"]
+    },
+    {
+      "id": "AbuseIPDB",
+      "displayName": "AbuseIPDB",
+      "description": "IP abuse confidence for discovered addresses.",
+      "keyLocation": "AbuseIPDB -> Account -> Create Key (API v2) -> copy key.",
+      "docsUrl": "https://www.abuseipdb.com/account/api",
+      "envVars": ["ETM_ABUSEIPDB_API_KEY"]
+    },
+    {
+      "id": "GreyNoise",
+      "displayName": "GreyNoise",
+      "description": "Internet background noise context for IPs.",
+      "keyLocation": "GreyNoise -> Account -> API Access -> copy API Key.",
+      "docsUrl": "https://www.greynoise.io/vault/account",
+      "envVars": ["ETM_GREYNOISE_API_KEY"]
+    },
+    {
+      "id": "AlienVaultOTX",
+      "displayName": "AlienVault OTX",
+      "description": "Open threat exchange pulses linked to the domain.",
+      "keyLocation": "OTX -> Settings -> API Key (optional for light use).",
+      "docsUrl": "https://otx.alienvault.com/api",
+      "envVars": ["ETM_OTX_API_KEY", "OTX_API_KEY"]
+    },
+    {
+      "id": "GitHub",
+      "displayName": "GitHub",
+      "description": "Public code search metadata (no secret validation).",
+      "keyLocation": "GitHub -> Settings -> Developer settings -> Personal access tokens -> Generate (read-only).",
+      "docsUrl": "https://github.com/settings/tokens",
+      "envVars": ["ETM_GITHUB_TOKEN", "GITHUB_TOKEN"]
+    },
+    {
+      "id": "HIBP",
+      "displayName": "Have I Been Pwned",
+      "description": "Breach exposure API (domain search where licensed).",
+      "keyLocation": "haveibeenpwned.com -> API Key page after purchase -> copy key.",
+      "docsUrl": "https://haveibeenpwned.com/API/Key",
+      "envVars": ["ETM_HIBP_API_KEY", "HIBP_API_KEY"]
+    }
+  ]
+}

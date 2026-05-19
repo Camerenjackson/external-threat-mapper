@@ -1,0 +1,37 @@
+{
+  "application": {
+    "name": "External Threat Mapper",
+    "version": "0.1.0",
+    "defaultScanMode": "PassiveOnly",
+    "passiveOnly": true,
+    "corporateSafeMode": true,
+    "rateLimitMs": 500,
+    "maxConcurrency": 5,
+    "viewMode": "Analyst",
+    "allowAiSummaries": false
+  },
+  "storage": {
+    "preferSqlite": true,
+    "dataDirectory": "data",
+    "historyDirectory": "data/history",
+    "localHistoryEnabled": true,
+    "reportsDirectory": "reports",
+    "logsDirectory": "logs",
+    "sql": {
+      "enabled": false,
+      "server": "localhost",
+      "database": "ExternalThreatMapper",
+      "integratedSecurity": true,
+      "userId": "",
+      "trustServerCertificate": true
+    }
+  },
+  "proxy": {
+    "enabled": false,
+    "url": ""
+  },
+  "riskKeywords": {
+    "subdomains": ["admin", "vpn", "sso", "login", "citrix", "jira", "grafana", "kibana", "splunk", "jenkins", "gitlab", "confluence", "owa", "exchange", "portal", "dev", "test", "staging"],
+    "webTitles": ["Dashboard", "Admin", "Login", "Sign in", "Grafana", "Kibana", "Jenkins", "GitLab", "Jira", "Confluence", "Splunk", "phpMyAdmin", "Tomcat"]
+  }
+}

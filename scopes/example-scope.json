@@ -1,0 +1,12 @@
+{
+  "organizationName": "Contoso Ltd",
+  "primaryDomain": "contoso.com",
+  "additionalDomains": ["contoso.net"],
+  "approvedCidrs": [],
+  "excludedDomains": ["contoso-partners.com"],
+  "excludedIps": [],
+  "scanMode": "PassiveOnly",
+  "authorizedBy": "Security Team",
+  "authorizationDate": "2026-01-01",
+  "notes": "Example scope file — replace with your authorized assessment scope."
+}

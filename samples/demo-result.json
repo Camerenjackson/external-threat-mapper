@@ -1,0 +1,76 @@
+{
+  "scanId": "00000000-0000-0000-0000-000000000001",
+  "score": {
+    "TotalScore": 58,
+    "Grade": "C - Moderate",
+    "Summary": "Protection score 58/100 (demo)."
+  },
+  "threatIntel": [
+    {
+      "provider": "Shodan",
+      "asset": "vpn.demo-corp.example",
+      "assetType": "hostname",
+      "severity": "Info",
+      "summary": "Subdomain observed in Shodan DNS data",
+      "detail": "Demo row",
+      "source": "shodan.io"
+    },
+    {
+      "provider": "VirusTotal",
+      "asset": "demo-corp.example",
+      "assetType": "domain",
+      "severity": "Low",
+      "summary": "VT detections: 0 malicious, 1 suspicious",
+      "detail": "Demo row",
+      "source": "virustotal.com"
+    },
+    {
+      "provider": "AlienVault OTX",
+      "asset": "demo-corp.example",
+      "assetType": "domain",
+      "severity": "Medium",
+      "summary": "Linked to 2 OTX threat pulses",
+      "detail": "Demo row",
+      "source": "otx.alienvault.com"
+    }
+  ],
+  "findings": [
+    {
+      "title": "Risky hostname: vpn.demo-corp.example",
+      "severity": "High",
+      "category": "subdomain",
+      "evidence": "Source: crt.sh; IP: 203.0.113.10",
+      "businessExplanation": "Internet-discoverable VPN hostname.",
+      "remediation": "Restrict public DNS.",
+      "confidence": "Medium",
+      "status": "Open"
+    },
+    {
+      "title": "[VirusTotal] VT detections: 0 malicious, 1 suspicious",
+      "severity": "Low",
+      "category": "threat-intel",
+      "evidence": "demo-corp.example via virustotal.com",
+      "businessExplanation": "Third-party reputation signal.",
+      "remediation": "Review VT report.",
+      "confidence": "Medium",
+      "status": "Open"
+    },
+    {
+      "title": "Resolvable typosquat candidate: dem0-corp.example",
+      "severity": "Medium",
+      "category": "typosquat-brand",
+      "evidence": "DNS resolves",
+      "businessExplanation": "Phishing risk.",
+      "remediation": "Monitor brand abuse.",
+      "confidence": "Medium",
+      "status": "Open"
+    }
+  ],
+  "subdomains": [
+    { "hostname": "www.demo-corp.example", "source": "crt.sh", "ip": "203.0.113.1", "riskScore": 20 },
+    { "hostname": "vpn.demo-corp.example", "source": "crt.sh", "ip": "203.0.113.10", "riskScore": 75 }
+  ],
+  "webServices": [
+    { "hostname": "www.demo-corp.example", "url": "https://www.demo-corp.example", "statusCode": 200, "title": "Welcome" }
+  ]
+}
