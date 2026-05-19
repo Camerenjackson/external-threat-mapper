@@ -64,8 +64,9 @@ function Add-ETMScanRecord {
 function Add-ETMSubdomainRecords {
     param(
         [Parameter(Mandatory)][string]$ScanId,
-        [Parameter(Mandatory)][array]$Records
+        [array]$Records = @()
     )
+    if (-not $Records -or $Records.Count -eq 0) { return }
     $store = Get-ETMJsonStore
     $list = [System.Collections.ArrayList]@()
     if ($store.subdomains) { $store.subdomains | ForEach-Object { [void]$list.Add($_) } }
@@ -80,8 +81,9 @@ function Add-ETMSubdomainRecords {
 function Add-ETMFindingRecords {
     param(
         [Parameter(Mandatory)][string]$ScanId,
-        [Parameter(Mandatory)][array]$Findings
+        [array]$Findings = @()
     )
+    if (-not $Findings -or $Findings.Count -eq 0) { return }
     $store = Get-ETMJsonStore
     $list = [System.Collections.ArrayList]@()
     if ($store.findings) { $store.findings | ForEach-Object { [void]$list.Add($_) } }

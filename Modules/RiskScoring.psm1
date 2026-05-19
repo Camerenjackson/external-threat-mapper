@@ -11,9 +11,9 @@ function Get-ETMGrade {
 
 function Measure-ETMProtectionScore {
     param(
-        [Parameter(Mandatory)][array]$Findings,
-        [Parameter(Mandatory)][array]$Subdomains,
-        [Parameter(Mandatory)][array]$WebServices
+        [array]$Findings = @(),
+        [array]$Subdomains = @(),
+        [array]$WebServices = @()
     )
 
     $categories = [ordered]@{

@@ -33,7 +33,7 @@ function Invoke-ETMSafeWebProbe {
 
 function Invoke-ETMWebProbeBatch {
     param(
-        [Parameter(Mandatory)][array]$Hostnames,
+        [array]$Hostnames = @(),
         [ValidateSet('PassiveOnly', 'CorporateSafe', 'FullAuthorized')]
         [string]$ScanMode = 'CorporateSafe',
         [int]$RateLimitMs = 500

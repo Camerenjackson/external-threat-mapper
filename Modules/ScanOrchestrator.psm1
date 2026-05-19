@@ -106,7 +106,7 @@ function Start-ETMExternalScan {
     & $ProgressCallback 95 'Scoring and MITRE mapping...'
     Add-ETMFindingRecords -ScanId $scanId -Findings $findings
 
-    $score = Measure-ETMProtectionScore -Findings $findings -Subdomains $subs -WebServices $web
+    $score = Measure-ETMProtectionScore -Findings @($findings) -Subdomains @($subs) -WebServices @($web)
     foreach ($f in $findings) {
         $f | Add-Member -NotePropertyName mitre -NotePropertyValue (Get-ETMMitreMappingForFinding -Finding $f) -Force
     }

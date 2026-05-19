@@ -26,7 +26,8 @@ function Get-ETMSubdomainsFromCertificateTransparency {
     catch {
         Write-Verbose "CT lookup skipped or failed: $($_.Exception.Message)"
     }
-    return $results
+    # Unary comma stops PowerShell from enumerating the list (empty list would otherwise output nothing).
+    return ,$results
 }
 
 function Get-ETMSubdomainsFromDnsBruteforceLite {
@@ -40,12 +41,12 @@ function Get-ETMSubdomainsFromDnsBruteforceLite {
     }
     $results = [System.Collections.Generic.List[object]]::new()
     foreach ($p in $Prefixes) {
-        $host = "$p.$Domain"
+        $fqdn = "$p.$Domain"
         try {
-            $dns = Resolve-DnsName -Name $host -Type A -ErrorAction Stop | Select-Object -First 1
+            $dns = Resolve-DnsName -Name $fqdn -Type A -ErrorAction Stop | Select-Object -First 1
             if ($dns) {
                 $results.Add([pscustomobject]@{
-                        hostname  = $host
+                        hostname  = $fqdn
                         source    = 'DNS-Passive'
                         ip        = ($dns.IPAddress -join ',')
                         riskScore = 0
@@ -58,7 +59,7 @@ function Get-ETMSubdomainsFromDnsBruteforceLite {
         catch { }
         Start-Sleep -Milliseconds $RateLimitMs
     }
-    return $results
+    return ,$results
 }
 
 function Invoke-ETMSubdomainDiscovery {
@@ -70,10 +71,12 @@ function Invoke-ETMSubdomainDiscovery {
     $all = [System.Collections.Generic.List[object]]::new()
     $rate = if ($Config.application.rateLimitMs) { [int]$Config.application.rateLimitMs } else { 500 }
 
-    $all.AddRange((Get-ETMSubdomainsFromCertificateTransparency -Domain $domain))
+    $ct = Get-ETMSubdomainsFromCertificateTransparency -Domain $domain
+    if ($ct) { $all.AddRange($ct) }
     if ($Scope.scanMode -ne 'PassiveOnly') {
         # Still DNS-only — not intrusive port scan
-        $all.AddRange((Get-ETMSubdomainsFromDnsBruteforceLite -Domain $domain -RateLimitMs $rate))
+        $dnsLite = Get-ETMSubdomainsFromDnsBruteforceLite -Domain $domain -RateLimitMs $rate
+        if ($dnsLite) { $all.AddRange($dnsLite) }
     }
 
     $keywords = $Config.riskKeywords.subdomains

@@ -11,6 +11,8 @@
 
 > **Authorized assessments only.** Use on targets you own or are permitted to test.
 
+**Repository (private):** [github.com/Camerenjackson/external-threat-mapper](https://github.com/Camerenjackson/external-threat-mapper)
+
 ## Features
 
 - Modern sidebar UI (Dashboard, Target, Discovery, Threat Intel, Integrations, History, Reports)
