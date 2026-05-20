@@ -492,8 +492,6 @@ Do you confirm you are authorized to assess your targets?
         $pwdSql.BorderBrush = New-ETMUiBrush '#263041'
     }
     Refresh-HistoryGrid
-    Append-LogUi 'Ready. Connect APIs under Integrations, set target, then Run scan.'
-    Restore-LastScanIfAny
 
     $scopePath = Join-Path (Get-ETMProjectRoot) 'scopes\current-scope.json'
     if (Test-Path $scopePath) {
@@ -501,23 +499,23 @@ Do you confirm you are authorized to assess your targets?
             $savedScope = Import-ETMScopeFile -Path $scopePath
             if ($savedScope.organizationName) { (& $get 'TxtOrg').Text = [string]$savedScope.organizationName }
             if ($savedScope.primaryDomain) { (& $get 'TxtDomain').Text = [string]$savedScope.primaryDomain }
-            if ($savedScope.authorizationAcknowledged) {
-                (& $get 'ChkAuthorized').IsChecked = $true
-            }
         }
         catch { }
     }
 
-    if (-not (& $get 'ChkAuthorized').IsChecked) {
-        if (-not (Show-AuthorizationPrompt)) {
-            [System.Windows.MessageBox]::Show(
-                "You chose not to confirm authorization.`n`nExternal Threat Mapper will close. Re-open the app when you are ready to confirm you may assess your targets.",
-                'Authorization required',
-                'OK',
-                'Information') | Out-Null
-            return
-        }
+    # Always confirm authorization each time the app opens (saved scope does not skip this).
+    (& $get 'ChkAuthorized').IsChecked = $false
+    if (-not (Show-AuthorizationPrompt)) {
+        [System.Windows.MessageBox]::Show(
+            "You chose not to confirm authorization.`n`nExternal Threat Mapper will close. Re-open the app when you are ready to confirm you may assess your targets.",
+            'Authorization required',
+            'OK',
+            'Information') | Out-Null
+        return
     }
+
+    Append-LogUi 'Ready. Connect APIs under Integrations, set target, then Run scan.'
+    Restore-LastScanIfAny
 
     (& $get 'NavList').Add_SelectionChanged({
         $item = (& $get 'NavList').SelectedItem

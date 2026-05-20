@@ -11,7 +11,7 @@ External Threat Mapper helps you **see what attackers might find** about your or
 
 ## First-time setup (2 minutes)
 
-1. Open the app and click **Yes** on the authorization prompt (required once; **No** closes the app).
+1. Open the app and click **Yes** on the authorization prompt each time you start (**No** closes the app).
 2. Click **Integrations** and add any API keys you have (optional for demo).
 3. Open **Target** and enter a domain you are allowed to test.
 4. Check the authorization box.
