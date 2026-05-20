@@ -8,12 +8,56 @@ function Test-ETMScanCancelled {
     return $false
 }
 
+function Publish-ETMLiveScanSnapshot {
+    param(
+        $LiveState,
+        [string]$ScanId,
+        $Findings,
+        $Subs,
+        $Web,
+        $Intel,
+        [string]$Phase
+    )
+    if (-not $LiveState) { return }
+    $score = $null
+    try {
+        $fa = ConvertTo-ETMObjectArray $Findings
+        $sa = ConvertTo-ETMObjectArray $Subs
+        $wa = ConvertTo-ETMObjectArray $Web
+        if ($fa.Count -gt 0 -or $sa.Count -gt 0 -or $wa.Count -gt 0) {
+            $score = Measure-ETMProtectionScore -Findings $fa -Subdomains $sa -WebServices $wa
+        }
+    }
+    catch { }
+
+    $findingsList = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Findings)) { [void]$findingsList.Add($x) }
+    $subsList = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Subs)) { [void]$subsList.Add($x) }
+    $webList = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Web)) { [void]$webList.Add($x) }
+    $intelList = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Intel)) { [void]$intelList.Add($x) }
+
+    $LiveState.snapshot = [pscustomobject]@{
+        scanId      = $ScanId
+        findings    = $findingsList
+        subdomains  = $subsList
+        webServices = $webList
+        threatIntel = $intelList
+        score       = $score
+    }
+    $LiveState.phase = $Phase
+    $LiveState.version = [int]$LiveState.version + 1
+}
+
 function Start-ETMExternalScan {
     param(
         [Parameter(Mandatory)][psobject]$Scope,
         [Parameter(Mandatory)][psobject]$Config,
         [scriptblock]$ProgressCallback,
-        $CancelFlag
+        $CancelFlag,
+        $LiveState
     )
 
     $scanId = [guid]::NewGuid().ToString()
@@ -21,6 +65,9 @@ function Start-ETMExternalScan {
     Add-ETMScanRecord -ScanId $scanId -Scope $Scope -Status 'Running'
 
     $findings = [System.Collections.Generic.List[object]]::new()
+
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs @() `
+        -Web @() -Intel @() -Phase 'Scan started'
 
     & $ProgressCallback 5 'Discovering subdomains (passive, no API key required)...'
     if (Test-ETMScanCancelled $CancelFlag) { return $null }
@@ -40,6 +87,8 @@ function Start-ETMExternalScan {
                 status               = 'Open'
             })
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel @() -Phase 'Subdomains discovered'
 
     & $ProgressCallback 35 'Checking typosquat candidates...'
     if (Test-ETMScanCancelled $CancelFlag) { return $null }
@@ -59,6 +108,8 @@ function Start-ETMExternalScan {
                 })
         }
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel @() -Phase 'Typosquat check complete'
 
     & $ProgressCallback 55 'Cloud exposure indicators...'
     if (Test-ETMScanCancelled $CancelFlag) { return $null }
@@ -78,6 +129,8 @@ function Start-ETMExternalScan {
                 })
         }
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel @() -Phase 'Cloud checks complete'
 
     & $ProgressCallback 65 'Threat intel (skipped if no API keys)...'
     $intelRows = @()
@@ -90,6 +143,8 @@ function Start-ETMExternalScan {
             foreach ($f in $intelFindings) { $findings.Add($f) }
         }
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel $intelRows -Phase 'Threat intel complete'
 
     & $ProgressCallback 75 'GitHub metadata search...'
     if (Test-ETMScanCancelled $CancelFlag) { return $null }
@@ -110,6 +165,8 @@ function Start-ETMExternalScan {
                 })
         }
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel $intelRows -Phase 'GitHub search complete'
 
     & $ProgressCallback 85 'Safe web probing...'
     $web = @()
@@ -117,6 +174,8 @@ function Start-ETMExternalScan {
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $web = @(Invoke-ETMWebProbeBatch -Hostnames ($subs.hostname | Select-Object -First 15) -ScanMode $Scope.scanMode)
     }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web $web -Intel $intelRows -Phase 'Web probe complete'
 
     & $ProgressCallback 95 'Scoring and MITRE mapping...'
     Add-ETMFindingRecords -ScanId $scanId -Findings $findings
@@ -146,4 +205,4 @@ function Start-ETMExternalScan {
     return $scanResult
 }
 
-Export-ModuleMember -Function 'Start-ETMExternalScan', 'Test-ETMScanCancelled'
+Export-ModuleMember -Function 'Start-ETMExternalScan', 'Test-ETMScanCancelled', 'Publish-ETMLiveScanSnapshot'

@@ -53,6 +53,7 @@ function Show-ETMMainWindow {
         scanTimer   = $null
         cancelSync  = $null
         sqlConnected = $false
+        lastLiveVersion = -1
         discoveryRows = @()
         apiFields   = @{}
     }
@@ -181,6 +182,33 @@ function Show-ETMMainWindow {
             return $false
         }
         return $true
+    }
+
+    function Update-UiLive {
+        param($Snapshot)
+        if (-not $Snapshot) { return }
+        $partial = Normalize-ETMScanResult $Snapshot
+        $findings = ConvertTo-ETMObjectList $partial.findings
+        $subs = ConvertTo-ETMObjectList $partial.subdomains
+        $web = ConvertTo-ETMObjectList $partial.webServices
+        $intel = ConvertTo-ETMObjectList $partial.threatIntel
+        $score = $partial.score
+
+        if ($score) {
+            (& $get 'TxtScore').Text = [string]$score.TotalScore
+            (& $get 'TxtGrade').Text = "$($score.Grade)"
+        }
+        else {
+            (& $get 'TxtScore').Text = '...'
+            (& $get 'TxtGrade').Text = 'Updating...'
+        }
+        (& $get 'TxtFindingCount').Text = [string]$findings.Count
+        (& $get 'TxtAssetCount').Text = [string]($subs.Count + $web.Count)
+        (& $get 'TxtIntelCount').Text = [string]$intel.Count
+        Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items $findings
+        Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items $intel
+        $state.discoveryRows = Build-DiscoveryRows $partial
+        Apply-DiscoveryFilter
     }
 
     function Reset-DashboardUi {
@@ -669,12 +697,19 @@ Do you confirm authorization?
         (& $get 'TxtProgressMsg').Text = 'Starting scan (API keys optional for basic checks)...'
         (& $get 'TxtStatus').Text = "Scanning $($scope.primaryDomain)..."
         Append-LogUi "Scan started [$($scope.scanMode)]. Basic checks work without API keys."
+        Show-Page 'Dashboard'
+        $state.lastLiveVersion = -1
+        (& $get 'TxtScore').Text = '...'
+        (& $get 'TxtGrade').Text = 'Scanning...'
+        Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items @()
+        Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items @()
 
         $root = Get-ETMProjectRoot
         $prog = [hashtable]::Synchronized(@{ pct = 2; msg = 'Starting...' })
+        $live = [hashtable]::Synchronized(@{ version = 0; snapshot = $null; phase = '' })
         $cancelSync = $state.cancelSync
         $startJob = {
-            param($Root, $Scope, $Config, $Cancel, $Prog)
+            param($Root, $Scope, $Config, $Cancel, $Prog, $Live)
             $ErrorActionPreference = 'Stop'
             Import-Module (Join-Path $Root 'ExternalThreatMapper.psm1') -Force
             $cb = {
@@ -682,13 +717,13 @@ Do you confirm authorization?
                 $Prog.pct = $p
                 $Prog.msg = $m
             }
-            Start-ETMExternalScan -Scope $Scope -Config $Config -ProgressCallback $cb -CancelFlag $Cancel
+            Start-ETMExternalScan -Scope $Scope -Config $Config -ProgressCallback $cb -CancelFlag $Cancel -LiveState $Live
         }
         if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
-            $state.scanJob = Start-ThreadJob -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog
+            $state.scanJob = Start-ThreadJob -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog, $live
         }
         else {
-            $state.scanJob = Start-Job -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog
+            $state.scanJob = Start-Job -ScriptBlock $startJob -ArgumentList $root, $scope, $state.config, $cancelSync, $prog, $live
         }
 
         $state.scanTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -698,6 +733,20 @@ Do you confirm authorization?
                 if ($prog.msg) {
                     (& $get 'TxtProgressMsg').Text = $prog.msg
                     (& $get 'ScanProgress').Value = [Math]::Min(99, [double]$prog.pct)
+                }
+                if ($live -and $null -ne $live.version -and $live.version -ne $state.lastLiveVersion) {
+                    $state.lastLiveVersion = [int]$live.version
+                    try {
+                        if ($live.snapshot) {
+                            Update-UiLive $live.snapshot
+                            $fc = (ConvertTo-ETMObjectList $live.snapshot.findings).Count
+                            $phase = if ($live.phase) { $live.phase } else { $prog.msg }
+                            (& $get 'TxtStatus').Text = "Scanning $($scope.primaryDomain) - $phase ($fc findings so far)"
+                        }
+                    }
+                    catch {
+                        Write-Verbose "Live UI refresh: $($_.Exception.Message)"
+                    }
                 }
                 $job = $state.scanJob
                 if (-not $job) { return }
