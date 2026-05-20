@@ -255,6 +255,7 @@ function Show-ETMMainWindow {
     }
 
     function Show-AuthorizationPrompt {
+        param([switch]$ForScan)
         $msg = @"
 External Threat Mapper uses passive and authorized defensive reconnaissance only.
 
@@ -262,12 +263,23 @@ External Threat Mapper uses passive and authorized defensive reconnaissance only
 - Use only on targets you are authorized to assess
 - Third-party APIs (Shodan, VirusTotal, etc.) require your own API keys
 
-Do you confirm authorization?
+Do you confirm you are authorized to assess your targets?
 "@
-        $r = [System.Windows.MessageBox]::Show($msg, 'Authorization', 'YesNo', 'Warning')
+        $r = [System.Windows.MessageBox]::Show($msg, 'Authorization required', 'YesNo', 'Warning')
         if ($r -eq 'Yes') {
             (& $get 'ChkAuthorized').IsChecked = $true
+            $scope = Get-ScopeFromForm
+            $scope.authorizationAcknowledged = $true
+            try {
+                Export-ETMScopeFile -Scope $scope -Path (Join-Path (Get-ETMProjectRoot) 'scopes\current-scope.json')
+            }
+            catch { }
             return $true
+        }
+        if ($ForScan) {
+            [System.Windows.MessageBox]::Show(
+                'A scan cannot run without authorization. Check the box on the Target page when you are permitted to assess that domain.',
+                'Authorization required', 'OK', 'Information') | Out-Null
         }
         return $false
     }
@@ -483,8 +495,28 @@ Do you confirm authorization?
     Append-LogUi 'Ready. Connect APIs under Integrations, set target, then Run scan.'
     Restore-LastScanIfAny
 
-    if (-not (Show-AuthorizationPrompt)) {
-        Append-LogUi 'Authorization not confirmed.'
+    $scopePath = Join-Path (Get-ETMProjectRoot) 'scopes\current-scope.json'
+    if (Test-Path $scopePath) {
+        try {
+            $savedScope = Import-ETMScopeFile -Path $scopePath
+            if ($savedScope.organizationName) { (& $get 'TxtOrg').Text = [string]$savedScope.organizationName }
+            if ($savedScope.primaryDomain) { (& $get 'TxtDomain').Text = [string]$savedScope.primaryDomain }
+            if ($savedScope.authorizationAcknowledged) {
+                (& $get 'ChkAuthorized').IsChecked = $true
+            }
+        }
+        catch { }
+    }
+
+    if (-not (& $get 'ChkAuthorized').IsChecked) {
+        if (-not (Show-AuthorizationPrompt)) {
+            [System.Windows.MessageBox]::Show(
+                "You chose not to confirm authorization.`n`nExternal Threat Mapper will close. Re-open the app when you are ready to confirm you may assess your targets.",
+                'Authorization required',
+                'OK',
+                'Information') | Out-Null
+            return
+        }
     }
 
     (& $get 'NavList').Add_SelectionChanged({
@@ -678,8 +710,8 @@ Do you confirm authorization?
             return
         }
         if (-not $scope.authorizationAcknowledged) {
-            if (-not (Show-AuthorizationPrompt)) { return }
-            $scope.authorizationAcknowledged = $true
+            if (-not (Show-AuthorizationPrompt -ForScan)) { return }
+            $scope = Get-ScopeFromForm
         }
 
         if ($state.isDemo -or $state.lastResult) {
