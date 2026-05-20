@@ -13,7 +13,11 @@ reports/*
 config/config.json
 scopes/*.json
 !scopes/example-scope.json
+scopes/current-scope.json
 credentials/
+credentials/**
+docker/.env
+*.dpapi.json
 
 # Build / IDE
 dist/

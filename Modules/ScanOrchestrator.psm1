@@ -142,6 +142,24 @@ function Start-ETMExternalScan {
     $subs = @(Invoke-ETMSubdomainDiscovery -Scope $Scope -Config $Config -CancelFlag $CancelFlag)
     $stopped = Stop-IfCancelled
     if ($stopped) { return $stopped }
+
+    if (@(Get-ETMConfiguredApiProviders -ProviderIds @('Shodan', 'SecurityTrails')).Count -gt 0) {
+        & $ProgressCallback 12 'API-assisted discovery (Shodan, SecurityTrails)...'
+        if (-not (Test-ETMScanCancelled $CancelFlag)) {
+            $apiSubs = @(Invoke-ETMApiSubdomainDiscovery -Domain $Scope.primaryDomain -Config $Config)
+            if ($apiSubs.Count -gt 0) {
+                $subs = @(Merge-ETMSubdomainLists -Primary $subs -Additional $apiSubs)
+                $kw = if ($Config.riskKeywords -and $Config.riskKeywords.subdomains) {
+                    @($Config.riskKeywords.subdomains)
+                } else { @() }
+                $subs = @(Update-ETMSubdomainRiskScores -Subdomains $subs -Keywords $kw)
+                Write-ETMLog -Level INFO -Message 'Merged API-discovered subdomains' -Data @{
+                    domain = $Scope.primaryDomain; total = $subs.Count; fromApi = $apiSubs.Count
+                }
+            }
+        }
+    }
+
     Add-ETMSubdomainRecords -ScanId $scanId -Records $subs
 
     foreach ($s in $subs | Where-Object { $_.riskScore -ge 50 }) {
@@ -206,7 +224,7 @@ function Start-ETMExternalScan {
 
     $configuredApis = @(Get-ETMConfiguredApiProviders)
     $apiNames = Get-ETMConfiguredApiLabel
-    $intelRows = @()
+    $intelRows = [System.Collections.Generic.List[object]]::new()
     $stopped = Stop-IfCancelled
     if ($stopped) { return $stopped }
 
@@ -217,18 +235,52 @@ function Start-ETMExternalScan {
         }
     }
     else {
-        & $ProgressCallback 65 "Threat intel via: $apiNames..."
+        & $ProgressCallback 65 "Threat intel via: $apiNames (domain + IP cascade)..."
         if (-not (Test-ETMScanCancelled $CancelFlag)) {
-            $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
-            $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips -ScanMode $Scope.scanMode)
-            if ($intelRows -and $intelRows.Count -gt 0) {
-                $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows @($intelRows))
+            $batch = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain `
+                    -Subdomains $subs -Config $Config -ScanMode $Scope.scanMode)
+            if ($batch.Count -gt 0) { $intelRows.AddRange($batch) }
+            if ($intelRows.Count -gt 0) {
+                $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows @($intelRows.ToArray()))
                 foreach ($f in $intelFindings) { $findings.Add($f) }
             }
         }
     }
     Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
-        -Web @() -Intel $intelRows -Phase 'Threat intel complete'
+        -Web @() -Intel @($intelRows.ToArray()) -Phase 'Threat intel complete'
+
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
+    if (Test-ETMApiConfigured -Provider 'HIBP') {
+        & $ProgressCallback 72 'Credential breach exposure (HIBP domain search)...'
+        if (-not (Test-ETMScanCancelled $CancelFlag)) {
+            $hibp = Get-ETMBreachExposure -Scope $Scope -ApiKey (Get-ETMApiSecret -Name 'HIBP')
+            if ($hibp.findings) {
+                foreach ($bf in @($hibp.findings)) { $findings.Add($bf) }
+            }
+            if ($hibp.intel) {
+                foreach ($bi in @($hibp.intel)) { $intelRows.Add($bi) }
+            }
+            if (-not $hibp.domainVerified -and $hibp.domainResults) {
+                $needs = @($hibp.domainResults | Where-Object { $_.NeedsVerification })
+                if ($needs.Count -gt 0) {
+                    Write-ETMLog -Level WARN -Message 'HIBP domain not verified' -Data @{
+                        domain = $Scope.primaryDomain
+                        hint   = 'https://haveibeenpwned.com/Dashboard'
+                    }
+                }
+            }
+            Write-ETMLog -Level INFO -Message 'HIBP breach phase complete' -Data @{
+                aliases = $hibp.aliasTotal
+                message = $hibp.message
+            }
+        }
+    }
+    else {
+        Write-ETMLog -Level INFO -Message 'HIBP breach phase skipped' -Data @{ reason = 'No HIBP API key' }
+    }
+    Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
+        -Web @() -Intel @($intelRows.ToArray()) -Phase 'Breach exposure check complete'
 
     & $ProgressCallback 75 'GitHub metadata search...'
     $stopped = Stop-IfCancelled
@@ -256,7 +308,7 @@ function Start-ETMExternalScan {
         }
     }
     Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
-        -Web @() -Intel $intelRows -Phase 'GitHub search complete'
+        -Web @() -Intel @($intelRows.ToArray()) -Phase 'GitHub search complete'
 
     & $ProgressCallback 85 'Safe web probing...'
     $stopped = Stop-IfCancelled
@@ -264,8 +316,19 @@ function Start-ETMExternalScan {
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $web = @(Invoke-ETMWebProbeBatch -Hostnames ($subs.hostname | Select-Object -First 15) -ScanMode $Scope.scanMode)
     }
+    if ($configuredApis.Count -gt 0 -and $web.Count -gt 0 -and -not (Test-ETMScanCancelled $CancelFlag)) {
+        & $ProgressCallback 88 'Follow-up intel on probed web hosts...'
+        $followUp = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain `
+                -Subdomains $subs -WebServices $web -ExistingIntel @($intelRows.ToArray()) `
+                -Config $Config -ScanMode $Scope.scanMode -FollowUpOnly)
+        if ($followUp.Count -gt 0) {
+            $intelRows.AddRange($followUp)
+            $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows $followUp)
+            foreach ($f in $intelFindings) { $findings.Add($f) }
+        }
+    }
     Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
-        -Web $web -Intel $intelRows -Phase 'Web probe complete'
+        -Web $web -Intel @($intelRows.ToArray()) -Phase 'Web probe complete'
 
     & $ProgressCallback 95 'Scoring and MITRE mapping...'
     Add-ETMFindingRecords -ScanId $scanId -Findings $findings
@@ -282,7 +345,7 @@ function Start-ETMExternalScan {
             scanId      = $scanId
             subdomains  = $subs
             webServices = $web
-            threatIntel = $intelRows
+            threatIntel = @($intelRows.ToArray())
             findings    = $findings
             score       = $score
         })

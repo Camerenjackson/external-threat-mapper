@@ -156,7 +156,129 @@
       <Setter Property="HeadersVisibility" Value="Column"/>
       <Setter Property="AutoGenerateColumns" Value="True"/>
       <Setter Property="IsReadOnly" Value="True"/>
-      <Setter Property="RowHeight" Value="34"/>
+      <Setter Property="RowHeight" Value="36"/>
+      <Setter Property="CanUserResizeRows" Value="False"/>
+    </Style>
+    <Style TargetType="DataGridRow">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,1"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#1A2838"/>
+        </Trigger>
+        <Trigger Property="IsSelected" Value="True">
+          <Setter Property="Background" Value="#1E3A5F"/>
+          <Setter Property="Foreground" Value="#FFFFFF"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="EtmScrollBarThumb" TargetType="Thumb">
+      <Setter Property="OverridesDefaultStyle" Value="True"/>
+      <Setter Property="IsTabStop" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Thumb">
+            <Border x:Name="ThumbBd" CornerRadius="6" Margin="2,3" Opacity="0.85">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                  <GradientStop Color="#2B6CB0" Offset="0"/>
+                  <GradientStop Color="#5CB0FF" Offset="1"/>
+                </LinearGradientBrush>
+              </Border.Background>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ThumbBd" Property="Opacity" Value="1"/>
+                <Setter TargetName="ThumbBd" Property="Effect">
+                  <Setter.Value>
+                    <DropShadowEffect Color="#4C9AFF" BlurRadius="12" ShadowDepth="0" Opacity="0.75"/>
+                  </Setter.Value>
+                </Setter>
+              </Trigger>
+              <Trigger Property="IsDragging" Value="True">
+                <Setter TargetName="ThumbBd" Property="Background">
+                  <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                      <GradientStop Color="#4C9AFF" Offset="0"/>
+                      <GradientStop Color="#7EC8FF" Offset="1"/>
+                    </LinearGradientBrush>
+                  </Setter.Value>
+                </Setter>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="EtmScrollBar" TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="OverridesDefaultStyle" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Grid x:Name="Bg" Background="#0E141C" Margin="2">
+              <Border Background="#151C28" CornerRadius="7" BorderBrush="#263041" BorderThickness="1"/>
+              <Track x:Name="PART_Track" IsDirectionReversed="True">
+                <Track.Thumb>
+                  <Thumb Style="{StaticResource EtmScrollBarThumb}"/>
+                </Track.Thumb>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Horizontal">
+          <Setter Property="Height" Value="14"/>
+          <Setter Property="Width" Value="Auto"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="#0E141C" Margin="2">
+                  <Border Background="#151C28" CornerRadius="7" BorderBrush="#263041" BorderThickness="1"/>
+                  <Track x:Name="PART_Track" IsDirectionReversed="False">
+                    <Track.Thumb>
+                      <Thumb Style="{StaticResource EtmScrollBarThumb}"/>
+                    </Track.Thumb>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Trigger>
+        <Trigger Property="Orientation" Value="Vertical">
+          <Setter Property="Width" Value="14"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource EtmScrollBar}"/>
+    <Style x:Key="DashTabItem" TargetType="TabItem">
+      <Setter Property="Foreground" Value="#8B9BB4"/>
+      <Setter Property="Padding" Value="14,8"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="8,8,0,0" Padding="{TemplateBinding Padding}" Margin="0,0,4,0">
+              <ContentPresenter ContentSource="Header"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#1A2433"/>
+                <Setter Property="Foreground" Value="#FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#141C28"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="DashTabControl" TargetType="TabControl">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
     </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Foreground" Value="#EEF2F8"/>
@@ -165,9 +287,6 @@
       <Setter Property="Background" Value="#1A2433"/>
       <Setter Property="Foreground" Value="{StaticResource Accent}"/>
       <Setter Property="BorderThickness" Value="0"/>
-    </Style>
-    <Style TargetType="ScrollBar">
-      <Setter Property="Background" Value="#121820"/>
     </Style>
     <Style TargetType="ListBox">
       <Setter Property="Background" Value="Transparent"/>
@@ -237,13 +356,13 @@
                 <TextBlock x:Name="TxtGrade" TextWrapping="Wrap" Foreground="#8B9BB4" FontSize="11"/>
               </StackPanel>
             </Border>
-            <Border Style="{StaticResource Card}" Margin="4,0">
+            <Border x:Name="CardFindings" Style="{StaticResource Card}" Margin="4,0" Cursor="Hand" ToolTip="Open findings list">
               <StackPanel>
                 <TextBlock Text="FINDINGS" Style="{StaticResource Lbl}"/>
                 <TextBlock x:Name="TxtFindingCount" Text="0" FontSize="38" FontWeight="Bold"/>
               </StackPanel>
             </Border>
-            <Border Style="{StaticResource Card}" Margin="4,0">
+            <Border x:Name="CardAssets" Style="{StaticResource Card}" Margin="4,0" Cursor="Hand" ToolTip="Open assets list">
               <StackPanel>
                 <TextBlock Text="ASSETS" Style="{StaticResource Lbl}"/>
                 <TextBlock x:Name="TxtAssetCount" Text="0" FontSize="38" FontWeight="Bold" Foreground="{StaticResource Good}"/>
@@ -258,8 +377,18 @@
           </UniformGrid>
           <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
             <DockPanel>
-              <TextBlock DockPanel.Dock="Top" Text="Priority findings" Margin="16,14,16,8" FontWeight="SemiBold"/>
-              <DataGrid x:Name="GridFindings" Margin="8,0,8,8"/>
+              <StackPanel DockPanel.Dock="Top" Margin="16,14,16,4">
+                <TextBlock Text="Scan results" FontWeight="SemiBold"/>
+                <TextBlock Text="Double-click any row for risk details, discovery method, and remediation." Foreground="#6B7A92" FontSize="11" Margin="0,4,0,0"/>
+              </StackPanel>
+              <TabControl x:Name="DashResultTabs" DockPanel.Dock="Top" Style="{StaticResource DashTabControl}" Margin="12,0,12,0">
+                <TabItem Header="Findings" Style="{StaticResource DashTabItem}">
+                  <DataGrid x:Name="GridFindings" Margin="0,8,0,8" MinHeight="220"/>
+                </TabItem>
+                <TabItem Header="Assets" Style="{StaticResource DashTabItem}">
+                  <DataGrid x:Name="GridAssets" Margin="0,8,0,8" MinHeight="220"/>
+                </TabItem>
+              </TabControl>
             </DockPanel>
           </Border>
         </Grid>
@@ -277,8 +406,12 @@
                 <ComboBoxItem Content="CorporateSafe"/>
                 <ComboBoxItem Content="FullAuthorized"/>
               </ComboBox>
-              <CheckBox x:Name="ChkAuthorized" Foreground="#EEF2F8" Margin="0,4,0,16"
+              <CheckBox x:Name="ChkAuthorized" Foreground="#EEF2F8" Margin="0,4,0,8"
                         Content="I have written authorization to assess this target."/>
+              <TextBlock Text="HIBP SEED EMAILS (OPTIONAL)" Style="{StaticResource Lbl}"/>
+              <TextBox x:Name="TxtBreachEmails" ToolTip="Comma-separated authorized mailboxes for single-account HIBP checks. Domain-wide breach search uses primary domain automatically."/>
+              <TextBlock TextWrapping="Wrap" Foreground="#6B7A92" FontSize="10" Margin="0,0,0,12"
+                         Text="Corporate scans use HIBP domain search (all @yourdomain aliases). Add up to 5 specific emails only if you are authorized to check them. Verify the domain in your HIBP dashboard first."/>
               <StackPanel Orientation="Horizontal">
                 <Button x:Name="BtnSaveScope" Content="Save scope" Style="{StaticResource BtnPrimary}" Margin="0,0,8,0"/>
                 <Button x:Name="BtnLoadScope" Content="Load scope" Style="{StaticResource BtnGhost}"/>
@@ -300,17 +433,22 @@
               <ComboBoxItem Content="Typosquatting"/>
               <ComboBoxItem Content="Cloud"/>
               <ComboBoxItem Content="GitHub"/>
+              <ComboBoxItem Content="Breaches"/>
             </ComboBox>
           </StackPanel>
           <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
-            <DataGrid x:Name="GridDiscovery" Margin="8"/>
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Margin="16,14,16,8" FontWeight="SemiBold"
+                         Text="Discovered assets — double-click a row for full detail"/>
+              <DataGrid x:Name="GridDiscovery" Margin="8,0,8,8"/>
+            </DockPanel>
           </Border>
         </Grid>
         <Grid x:Name="PageIntel" Visibility="Collapsed">
           <Border Style="{StaticResource Card}" Padding="0">
             <DockPanel>
               <TextBlock DockPanel.Dock="Top" Margin="16,14,16,8" FontWeight="SemiBold"
-                         Text="API enrichment (Shodan, VirusTotal, SecurityTrails, Censys, urlscan, OTX, AbuseIPDB, GreyNoise)"/>
+                         Text="API enrichment — double-click a row for provider and source detail"/>
               <DataGrid x:Name="GridIntel" Margin="8,0,8,8"/>
             </DockPanel>
           </Border>
@@ -410,6 +548,27 @@
               <TextBox x:Name="TxtLogs" Margin="12,0,12,12" IsReadOnly="True" TextWrapping="Wrap"
                        VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="12"
                        Background="#0A0E14" BorderThickness="0"/>
+            </DockPanel>
+          </Border>
+        </Grid>
+        <Grid x:Name="DetailOverlay" Visibility="Collapsed" Panel.ZIndex="200" Background="#80080B10">
+          <Border HorizontalAlignment="Right" Width="460" Background="#0F141C" BorderBrush="#263041" BorderThickness="1,0,0,0">
+            <Border.Effect>
+              <DropShadowEffect Color="#000000" BlurRadius="24" ShadowDepth="-4" Opacity="0.6"/>
+            </Border.Effect>
+            <DockPanel>
+              <Grid DockPanel.Dock="Top" Margin="18,16,18,8">
+                <StackPanel>
+                  <TextBlock x:Name="DetailTitle" Text="Details" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,40,0"/>
+                  <TextBlock x:Name="DetailSubtitle" Foreground="#7D8DA6" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+                <Button x:Name="BtnDetailClose" Content="✕" Style="{StaticResource BtnGhost}" Width="36" Height="36"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Padding="0" ToolTip="Close"/>
+              </Grid>
+              <Border DockPanel.Dock="Top" Height="1" Background="#263041" Margin="18,0"/>
+              <ScrollViewer Margin="0,8,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="DetailFieldsPanel" Margin="18,8,18,20"/>
+              </ScrollViewer>
             </DockPanel>
           </Border>
         </Grid>

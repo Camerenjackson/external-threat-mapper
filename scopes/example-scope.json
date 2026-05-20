@@ -6,6 +6,7 @@
   "excludedDomains": ["contoso-partners.com"],
   "excludedIps": [],
   "scanMode": "PassiveOnly",
+  "breachCheckEmails": [],
   "authorizedBy": "Security Team",
   "authorizationDate": "2026-01-01",
   "notes": "Example scope file — replace with your authorized assessment scope."

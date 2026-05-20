@@ -23,13 +23,13 @@ Open PowerShell in the project folder:
 
 ```powershell
 # Help
-powershell -File .\Start-ExternalThreatMapper.ps1 -Help
+powershell -File .\Scripts\Start-ExternalThreatMapper.ps1 -Help
 
 # Load-style test without GUI (use a domain you own)
-powershell -File .\Start-ExternalThreatMapper.ps1 -Domain example.com -ScanMode PassiveOnly
+powershell -File .\Scripts\Start-ExternalThreatMapper.ps1 -Domain example.com -ScanMode PassiveOnly
 
 # Test API keys
-powershell -File .\Start-ExternalThreatMapper.ps1 -TestApis
+powershell -File .\Scripts\Start-ExternalThreatMapper.ps1 -TestApis
 ```
 
 Reports save to the `reports\` folder. History saves to `data\history\`.
@@ -37,7 +37,7 @@ Reports save to the `reports\` folder. History saves to `data\history\`.
 ## Build the .exe
 
 ```powershell
-.\build.ps1
+.\Scripts\build.ps1
 ```
 
 Output: `dist\ExternalThreatMapper.exe`

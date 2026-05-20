@@ -22,6 +22,7 @@ function Get-ETMMitreMappingForFinding {
         'cloud|bucket|storage' { 'T1580' }
         'certificate|tls' { 'T1596' }
         'login|portal|admin' { 'T1078' }
+        'credential|breach|pwned' { 'T1078' }
         'web|http' { 'T1593' }
         default { 'T1590' }
     }

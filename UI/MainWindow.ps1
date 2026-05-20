@@ -1,6 +1,7 @@
 # MainWindow.ps1 - Modern sidebar UI (UiSafe.ps1 provides Register-ETMUiClick error wrappers)
 $uiScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $uiScriptDir 'UiSafe.ps1')
+. (Join-Path $uiScriptDir 'ItemDetail.ps1')
 
 function Show-ETMMainWindow {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
@@ -55,6 +56,8 @@ function Show-ETMMainWindow {
         activeScanScope = $null
         activeScanLive  = $null
         sqlConnected = $false
+        sqlConnectJob = $null
+        sqlConnectTimer = $null
         lastLiveVersion = -1
         discoveryRows = @()
         apiFields   = @{}
@@ -78,13 +81,27 @@ function Show-ETMMainWindow {
     $uiLog = { param($line) Append-LogUi $line }
     Initialize-ETMUiSafety -Window $window -OnLog $uiLog
 
+    function Get-BreachCheckEmailsFromForm {
+        $raw = (& $get 'TxtBreachEmails').Text
+        if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+        @($raw -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '@' })
+    }
+
     function Get-ScopeFromForm {
         $modeItem = & $get 'CmbScanMode'
         $mode = if ($modeItem.SelectedItem) { $modeItem.SelectedItem.Content } else { 'PassiveOnly' }
         New-ETMScopeObject -OrganizationName (& $get 'TxtOrg').Text.Trim() `
             -PrimaryDomain (& $get 'TxtDomain').Text.Trim() `
             -ScanMode $mode `
-            -AuthorizationAcknowledged (& $get 'ChkAuthorized').IsChecked
+            -AuthorizationAcknowledged (& $get 'ChkAuthorized').IsChecked `
+            -BreachCheckEmails (Get-BreachCheckEmailsFromForm)
+    }
+
+    function Set-BreachCheckEmailsOnForm {
+        param([string[]]$Emails)
+        $tb = & $get 'TxtBreachEmails'
+        if (-not $tb) { return }
+        $tb.Text = if ($Emails -and $Emails.Count -gt 0) { ($Emails -join ', ') } else { '' }
     }
 
     function Build-DiscoveryRows {
@@ -92,23 +109,54 @@ function Show-ETMMainWindow {
         $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($s in (ConvertTo-ETMObjectList $result.subdomains)) {
             $rows.Add([pscustomobject]@{
-                    type = 'Subdomain'; name = $s.hostname; detail = "IP: $($s.ip); risk: $($s.riskScore)"; source = $s.source
+                    type   = 'Subdomain'
+                    name   = $s.hostname
+                    detail = "IP: $($s.ip); risk: $($s.riskScore)"
+                    source = $s.source
+                    _kind  = 'subdomain'
+                    _data  = $s
                 })
         }
         foreach ($w in (ConvertTo-ETMObjectList $result.webServices)) {
             $rows.Add([pscustomobject]@{
-                    type = 'Web'; name = $w.hostname; detail = "$($w.url) [$($w.statusCode)]"; source = 'http-probe'
+                    type   = 'Web'
+                    name   = $w.hostname
+                    detail = "$($w.url) [$($w.statusCode)]"
+                    source = 'http-probe'
+                    _kind  = 'web'
+                    _data  = $w
                 })
         }
         foreach ($f in (ConvertTo-ETMObjectList $result.findings)) {
-            if ($f.category -eq 'typosquat-brand') {
-                $rows.Add([pscustomobject]@{ type = 'Typosquat'; name = $f.title; detail = $f.evidence; source = 'dns' })
+            if ($f.category -eq 'credential-breach') {
+                $rows.Add([pscustomobject]@{
+                        type = 'Breach'; name = $f.title; detail = $f.evidence; source = 'hibp'
+                        _kind = 'finding'; _data = $f
+                    })
+            }
+            elseif ($f.category -eq 'typosquat-brand') {
+                $rows.Add([pscustomobject]@{
+                        type = 'Typosquat'; name = $f.title; detail = $f.evidence; source = 'dns'
+                        _kind = 'finding'; _data = $f
+                    })
             }
             elseif ($f.category -eq 'cloud') {
-                $rows.Add([pscustomobject]@{ type = 'Cloud'; name = $f.title; detail = $f.evidence; source = 'cloud' })
+                $rows.Add([pscustomobject]@{
+                        type = 'Cloud'; name = $f.title; detail = $f.evidence; source = 'cloud'
+                        _kind = 'finding'; _data = $f
+                    })
             }
             elseif ($f.category -eq 'github-code') {
-                $rows.Add([pscustomobject]@{ type = 'GitHub'; name = $f.title; detail = $f.evidence; source = 'github' })
+                $rows.Add([pscustomobject]@{
+                        type = 'GitHub'; name = $f.title; detail = $f.evidence; source = 'github'
+                        _kind = 'finding'; _data = $f
+                    })
+            }
+            elseif ($f.category -eq 'subdomain') {
+                $rows.Add([pscustomobject]@{
+                        type = 'Subdomain finding'; name = $f.title; detail = $f.evidence; source = 'scan'
+                        _kind = 'finding'; _data = $f
+                    })
             }
         }
         return $rows.ToArray()
@@ -124,6 +172,7 @@ function Show-ETMMainWindow {
                 'Typosquatting' = 'Typosquat'
                 'Cloud'         = 'Cloud'
                 'GitHub'        = 'GitHub'
+                'Breaches'      = 'Breach'
             }
             $t = $map[$filter]
             if ($t) {
@@ -168,6 +217,7 @@ function Show-ETMMainWindow {
         Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items $findings
         Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items $intel
         $state.discoveryRows = Build-DiscoveryRows $result
+        Set-ETMDataGridSource -Grid (& $get 'GridAssets') -Items $state.discoveryRows
         Apply-DiscoveryFilter
     }
 
@@ -210,6 +260,7 @@ function Show-ETMMainWindow {
         Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items $findings
         Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items $intel
         $state.discoveryRows = Build-DiscoveryRows $partial
+        Set-ETMDataGridSource -Grid (& $get 'GridAssets') -Items $state.discoveryRows
         Apply-DiscoveryFilter
     }
 
@@ -223,15 +274,18 @@ function Show-ETMMainWindow {
         (& $get 'TxtAssetCount').Text = '0'
         (& $get 'TxtIntelCount').Text = '0'
         Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items @()
+        Set-ETMDataGridSource -Grid (& $get 'GridAssets') -Items @()
         Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items @()
         $state.discoveryRows = @()
         Set-ETMDataGridSource -Grid (& $get 'GridDiscovery') -Items @()
+        Hide-ETMItemDetail -GetControl $get
         (& $get 'TxtStatus').Text = $StatusText
         (& $get 'ScanProgress').Value = 0
         (& $get 'TxtProgressMsg').Text = ''
     }
 
     function Complete-ScanUiAfterStop {
+        param([switch]$ResetScoreCard)
         $state.scanRunning = $false
         $state.activeScanScope = $null
         $state.activeScanLive = $null
@@ -239,6 +293,10 @@ function Show-ETMMainWindow {
         (& $get 'ScanProgress').Value = 0
         (& $get 'TxtProgressMsg').Visibility = 'Collapsed'
         (& $get 'BtnCancelScan').Visibility = 'Collapsed'
+        if ($ResetScoreCard) {
+            (& $get 'TxtScore').Text = '--'
+            (& $get 'TxtGrade').Text = ''
+        }
     }
 
     function Invoke-ETMHardStopScan {
@@ -307,7 +365,7 @@ function Show-ETMMainWindow {
             }
         }
 
-        Complete-ScanUiAfterStop
+        Complete-ScanUiAfterStop -ResetScoreCard:(-not $saved)
         (& $get 'BtnCancelScan').IsEnabled = $true
 
         if (-not $saved) {
@@ -526,6 +584,80 @@ Do you confirm you are authorized to assess your targets?
         }
     }
 
+    function Invoke-ETMSqlConnectAsync {
+        param(
+            [string]$Server,
+            [string]$Database,
+            [bool]$IntegratedSecurity,
+            [string]$UserId,
+            [string]$PlainPassword
+        )
+        if ($state.sqlConnectTimer) {
+            try { $state.sqlConnectTimer.Stop() } catch { }
+            $state.sqlConnectTimer = $null
+        }
+        if ($state.sqlConnectJob) {
+            try { Remove-Job -Job $state.sqlConnectJob -Force -ErrorAction SilentlyContinue } catch { }
+            $state.sqlConnectJob = $null
+        }
+
+        $btn = & $get 'BtnSqlConnect'
+        $btn.IsEnabled = $false
+        (& $get 'TxtSqlConnectStatus').Text = 'Connecting...'
+
+        $root = Get-ETMProjectRoot
+        $connectBlock = {
+            param($Root, $Server, $Database, $IntegratedSecurity, $UserId, $PlainPassword)
+            Import-Module (Join-Path $Root 'ExternalThreatMapper.psm1') -Force
+            Connect-ETMSqlServer -Server $Server -Database $Database `
+                -IntegratedSecurity $IntegratedSecurity -UserId $UserId -PlainPassword $PlainPassword
+        }
+        $args = @($root, $Server, $Database, $IntegratedSecurity, $UserId, $PlainPassword)
+        if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+            $state.sqlConnectJob = Start-ThreadJob -ScriptBlock $connectBlock -ArgumentList $args
+        }
+        else {
+            $state.sqlConnectJob = Start-Job -ScriptBlock $connectBlock -ArgumentList $args
+        }
+
+        $state.sqlConnectTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $state.sqlConnectTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+        $state.sqlConnectTimer.Add_Tick({
+            $job = $state.sqlConnectJob
+            if (-not $job -or $job.State -eq 'Running') { return }
+            try {
+                $state.sqlConnectTimer.Stop()
+                $state.sqlConnectTimer = $null
+                $r = Receive-Job -Job $job -ErrorAction Stop
+            }
+            catch {
+                $r = [pscustomobject]@{ Ok = $false; Message = $_.Exception.Message }
+            }
+            finally {
+                try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch { }
+                $state.sqlConnectJob = $null
+                (& $get 'BtnSqlConnect').IsEnabled = $true
+            }
+            if (-not $r) {
+                $r = [pscustomobject]@{ Ok = $false; Message = 'Connection ended with no response.' }
+            }
+            (& $get 'TxtSqlConnectStatus').Text = $r.Message
+            if ($r.Ok) {
+                $state.sqlConnected = $true
+                (& $get 'ChkSqlEnabled').IsChecked = $true
+                Update-SqlTabAccess
+                Refresh-SqlGrid
+                Append-LogUi 'SQL Server connected.'
+            }
+            else {
+                $state.sqlConnected = $false
+                Update-SqlTabAccess
+                Append-LogUi "SQL connect failed: $($r.Message)"
+            }
+        })
+        $state.sqlConnectTimer.Start()
+    }
+
     function Refresh-SqlGrid {
         if (-not $state.sqlConnected) { return }
         try {
@@ -578,6 +710,9 @@ Do you confirm you are authorized to assess your targets?
             $savedScope = Import-ETMScopeFile -Path $scopePath
             if ($savedScope.organizationName) { (& $get 'TxtOrg').Text = [string]$savedScope.organizationName }
             if ($savedScope.primaryDomain) { (& $get 'TxtDomain').Text = [string]$savedScope.primaryDomain }
+            if ($savedScope.PSObject.Properties['breachCheckEmails']) {
+                Set-BreachCheckEmailsOnForm -Emails @($savedScope.breachCheckEmails)
+            }
         }
         catch { }
     }
@@ -671,28 +806,21 @@ Do you confirm you are authorized to assess your targets?
     }
 
     Register-ETMUiClick -Control (& $get 'BtnSqlConnect') -Context 'Connect SQL' -OnLog $uiLog -Handler {
-        (& $get 'TxtSqlConnectStatus').Text = 'Connecting...'
+        $server = (& $get 'TxtSqlServer').Text.Trim()
+        $database = (& $get 'TxtSqlDatabase').Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($server) -or [string]::IsNullOrWhiteSpace($database)) {
+            (& $get 'TxtSqlConnectStatus').Text = 'Enter server and database name before connecting.'
+            return
+        }
+        $integrated = [bool](& $get 'ChkSqlIntegrated').IsChecked
         $pwd = Get-SqlPasswordFromForm
-        $r = Connect-ETMSqlServer `
-            -Server (& $get 'TxtSqlServer').Text.Trim() `
-            -Database (& $get 'TxtSqlDatabase').Text.Trim() `
-            -IntegratedSecurity (& $get 'ChkSqlIntegrated').IsChecked `
-            -UserId (& $get 'TxtSqlUser').Text.Trim() `
-            -PlainPassword $pwd
+        if (-not $integrated -and -not $pwd -and -not (Get-ETMApiSecret -Name 'SqlPassword')) {
+            (& $get 'TxtSqlConnectStatus').Text = 'Enter SQL password, or enable Windows authentication.'
+            return
+        }
         if ($pwd) { (& $get 'PwdSql').Clear() }
-        (& $get 'TxtSqlConnectStatus').Text = $r.Message
-        if ($r.Ok) {
-            $state.sqlConnected = $true
-            (& $get 'ChkSqlEnabled').IsChecked = $true
-            Update-SqlTabAccess
-            Refresh-SqlGrid
-            Append-LogUi 'SQL Server connected.'
-        }
-        else {
-            $state.sqlConnected = $false
-            Update-SqlTabAccess
-            Append-LogUi "SQL connect failed: $($r.Message)"
-        }
+        Invoke-ETMSqlConnectAsync -Server $server -Database $database `
+            -IntegratedSecurity $integrated -UserId (& $get 'TxtSqlUser').Text.Trim() -PlainPassword $pwd
     }
 
     Register-ETMUiClick -Control (& $get 'BtnSqlDisconnect') -Context 'Disconnect SQL' -OnLog $uiLog -Handler {
@@ -749,6 +877,9 @@ Do you confirm you are authorized to assess your targets?
         (& $get 'TxtOrg').Text = $s.organizationName
         (& $get 'TxtDomain').Text = $s.primaryDomain
         (& $get 'ChkAuthorized').IsChecked = $s.authorizationAcknowledged
+        if ($s.PSObject.Properties['breachCheckEmails']) {
+            Set-BreachCheckEmailsOnForm -Emails @($s.breachCheckEmails)
+        }
         Append-LogUi 'Scope loaded.'
     }
 
@@ -818,6 +949,7 @@ Do you confirm you are authorized to assess your targets?
         (& $get 'TxtScore').Text = '...'
         (& $get 'TxtGrade').Text = 'Scanning...'
         Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items @()
+        Set-ETMDataGridSource -Grid (& $get 'GridAssets') -Items @()
         Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items @()
 
         $root = Get-ETMProjectRoot
@@ -892,6 +1024,7 @@ Do you confirm you are authorized to assess your targets?
                         Show-Page 'Dashboard'
                     }
                     else {
+                        Complete-ScanUiAfterStop -ResetScoreCard
                         (& $get 'TxtStatus').Text = 'Scan ended with no results (cancelled or no data).'
                         Append-LogUi 'Scan ended with no result payload.'
                     }
@@ -902,7 +1035,7 @@ Do you confirm you are authorized to assess your targets?
                     $err = (Receive-Job $job 2>&1 | Out-String).Trim()
                     Remove-Job $job -Force -ErrorAction SilentlyContinue
                     $state.scanJob = $null
-                    Complete-ScanUiAfterStop
+                    Complete-ScanUiAfterStop -ResetScoreCard
                     Append-LogUi "Scan error: $err"
                     (& $get 'TxtStatus').Text = 'Scan failed - see Reports log.'
                     [System.Windows.MessageBox]::Show(
@@ -946,6 +1079,36 @@ Do you confirm you are authorized to assess your targets?
         Export-ETMFindingsJson -ScanResult $state.lastResult -OutputPath $out
         [System.Windows.MessageBox]::Show("Saved:`n$out", 'Export') | Out-Null
     }
+
+    Register-ETMDataGridDetailView -GetControl $get -Grid (& $get 'GridFindings') -OnLog $uiLog
+    Register-ETMDataGridDetailView -GetControl $get -Grid (& $get 'GridAssets') -OnLog $uiLog
+    Register-ETMDataGridDetailView -GetControl $get -Grid (& $get 'GridDiscovery') -OnLog $uiLog
+    Register-ETMDataGridDetailView -GetControl $get -Grid (& $get 'GridIntel') -OnLog $uiLog
+
+    Register-ETMUiClick -Control (& $get 'BtnDetailClose') -Context 'Close detail' -OnLog $uiLog -Handler {
+        Hide-ETMItemDetail -GetControl $get
+    }
+    $detailOverlay = & $get 'DetailOverlay'
+    $detailOverlay.Add_MouseLeftButtonUp({
+        if ($_.OriginalSource -eq $detailOverlay) {
+            Hide-ETMItemDetail -GetControl $get
+        }
+    })
+
+    $cardFindings = & $get 'CardFindings'
+    $cardFindings.Add_MouseLeftButtonUp({
+        Show-Page 'Dashboard'
+        $tabs = & $get 'DashResultTabs'
+        if ($tabs -and $tabs.Items.Count -gt 0) { $tabs.SelectedIndex = 0 }
+        (& $get 'TxtStatus').Text = 'Findings list — double-click a row for full risk detail.'
+    })
+    $cardAssets = & $get 'CardAssets'
+    $cardAssets.Add_MouseLeftButtonUp({
+        Show-Page 'Dashboard'
+        $tabs = & $get 'DashResultTabs'
+        if ($tabs -and $tabs.Items.Count -gt 1) { $tabs.SelectedIndex = 1 }
+        (& $get 'TxtStatus').Text = 'Assets list — double-click a row for discovery source and risk.'
+    })
 
     try {
         [void]$window.ShowDialog()

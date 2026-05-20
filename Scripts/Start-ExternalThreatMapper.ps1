@@ -27,7 +27,13 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$root = $PSScriptRoot
+$root = if ($env:ETM_APP_ROOT -and (Test-Path $env:ETM_APP_ROOT)) {
+    $env:ETM_APP_ROOT
+} else {
+    Split-Path $PSScriptRoot -Parent
+}
+$env:ETM_APP_ROOT = $root
+Set-Location $root
 $configPath = Join-Path $root 'config\config.json'
 $examplePath = Join-Path $root 'config\config.example.json'
 if (-not (Test-Path $configPath) -and (Test-Path $examplePath)) {
@@ -39,14 +45,14 @@ function Show-ETMHelp {
 External Threat Mapper
 
 GUI (default):
-  powershell -STA -File .\Start-ExternalThreatMapper.ps1
+  powershell -STA -File .\Scripts\Start-ExternalThreatMapper.ps1
   Or double-click Launch-ETM.cmd
 
 Command-line scan:
-  powershell -File .\Start-ExternalThreatMapper.ps1 -Domain example.com -ScanMode PassiveOnly
+  powershell -File .\Scripts\Start-ExternalThreatMapper.ps1 -Domain example.com -ScanMode PassiveOnly
 
 Test API keys:
-  powershell -File .\Start-ExternalThreatMapper.ps1 -TestApis
+  powershell -File .\Scripts\Start-ExternalThreatMapper.ps1 -TestApis
 
 Authorized targets only. No exploitation.
 "@ | Write-Host

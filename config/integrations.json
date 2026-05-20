@@ -83,8 +83,8 @@
     {
       "id": "HIBP",
       "displayName": "Have I Been Pwned",
-      "description": "Breach exposure API (domain search where licensed).",
-      "keyLocation": "haveibeenpwned.com -> API Key page after purchase -> copy key.",
+      "description": "Corporate domain breach search (all @yourdomain mailboxes as aliases). Verify domain in HIBP dashboard first. Optional seed emails on Target tab.",
+      "keyLocation": "haveibeenpwned.com -> API Key (Pro) -> verify domain in Dashboard -> copy key.",
       "docsUrl": "https://haveibeenpwned.com/API/Key",
       "envVars": ["ETM_HIBP_API_KEY", "HIBP_API_KEY"]
     }

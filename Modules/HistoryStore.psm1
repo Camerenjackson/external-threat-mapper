@@ -99,6 +99,7 @@ function Build-ETMSqlConnectionString {
     $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
     $builder['Data Source'] = $Server
     $builder['Initial Catalog'] = $Database
+    $builder['Connect Timeout'] = 8
     $builder['TrustServerCertificate'] = $TrustServerCertificate
     if ($IntegratedSecurity) {
         $builder['Integrated Security'] = $true

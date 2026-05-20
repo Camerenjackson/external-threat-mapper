@@ -59,12 +59,14 @@ function New-ETMScopeObject {
         [string[]]$ExcludedIps = @(),
         [ValidateSet('PassiveOnly', 'CorporateSafe', 'FullAuthorized')]
         [string]$ScanMode = 'PassiveOnly',
-        [bool]$AuthorizationAcknowledged = $false
+        [bool]$AuthorizationAcknowledged = $false,
+        [string[]]$BreachCheckEmails = @()
     )
     [pscustomobject]@{
         organizationName          = $OrganizationName
         primaryDomain             = $PrimaryDomain
         additionalDomains         = @($AdditionalDomains)
+        breachCheckEmails         = @($BreachCheckEmails | Where-Object { $_ -match '@' })
         approvedCidrs             = @($ApprovedCidrs)
         excludedDomains           = @($ExcludedDomains)
         excludedIps               = @($ExcludedIps)
@@ -131,6 +133,16 @@ function ConvertTo-ETMObjectList {
     return $list
 }
 
+function Register-ETMDataGridColumnFilter {
+    param([Parameter(Mandatory)]$Grid)
+    if ($Grid.Tag -eq 'ETMColumnFilter') { return }
+    $Grid.Tag = 'ETMColumnFilter'
+    $Grid.Add_AutoGeneratingColumn({
+        param($sender, $e)
+        if ($e.PropertyName -match '^_') { $e.Cancel = $true }
+    })
+}
+
 function Set-ETMDataGridSource {
     <#
     .SYNOPSIS
@@ -140,6 +152,7 @@ function Set-ETMDataGridSource {
         [Parameter(Mandatory)]$Grid,
         $Items
     )
+    Register-ETMDataGridColumnFilter -Grid $Grid
     $list = ConvertTo-ETMObjectList $Items
     $Grid.ItemsSource = $null
     $bound = New-Object System.Collections.ArrayList
@@ -197,5 +210,5 @@ function Import-ETMScanResultJson {
 Export-ModuleMember -Function @(
     'Get-ETMProjectRoot', 'Get-ETMConfigPath', 'Get-ETMAppConfig', 'Save-ETMAppConfig',
     'Import-ETMScopeFile', 'Export-ETMScopeFile', 'New-ETMScopeObject', 'Test-ETMTargetAuthorized',
-    'ConvertTo-ETMObjectList', 'ConvertTo-ETMObjectArray', 'Set-ETMDataGridSource', 'Normalize-ETMScanResult', 'Import-ETMScanResultJson'
+    'ConvertTo-ETMObjectList', 'ConvertTo-ETMObjectArray', 'Register-ETMDataGridColumnFilter', 'Set-ETMDataGridSource', 'Normalize-ETMScanResult', 'Import-ETMScanResultJson'
 )

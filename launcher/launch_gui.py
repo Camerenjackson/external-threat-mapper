@@ -17,7 +17,7 @@ def get_app_root() -> Path:
 
 
 ROOT = get_app_root()
-START_SCRIPT = ROOT / "Start-ExternalThreatMapper.ps1"
+START_SCRIPT = ROOT / "Scripts" / "Start-ExternalThreatMapper.ps1"
 CONFIG_DIR = ROOT / "config"
 EXAMPLE_CONFIG = CONFIG_DIR / "config.example.json"
 USER_CONFIG = CONFIG_DIR / "config.json"

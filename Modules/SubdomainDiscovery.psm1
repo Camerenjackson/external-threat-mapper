@@ -62,6 +62,48 @@ function Get-ETMSubdomainsFromDnsBruteforceLite {
     return ,$results
 }
 
+function Merge-ETMSubdomainLists {
+    param(
+        [array]$Primary = @(),
+        [array]$Additional = @()
+    )
+    $map = @{}
+    foreach ($item in @($Primary) + @($Additional)) {
+        if (-not $item -or -not $item.hostname) { continue }
+        $h = $item.hostname.Trim().ToLower()
+        if (-not $map.ContainsKey($h)) {
+            $map[$h] = $item
+            continue
+        }
+        $existing = $map[$h]
+        if (-not $existing.ip -and $item.ip) { $existing.ip = $item.ip }
+        if ($item.source -and $existing.source -notlike "*$($item.source)*") {
+            $existing.source = "$($existing.source), $($item.source)"
+        }
+    }
+    return @($map.Values | Sort-Object hostname)
+}
+
+function Update-ETMSubdomainRiskScores {
+    param(
+        [Parameter(Mandatory)][array]$Subdomains,
+        [string[]]$Keywords
+    )
+    if (-not $Keywords) { return $Subdomains }
+    foreach ($item in $Subdomains) {
+        $score = 10
+        foreach ($kw in $Keywords) {
+            if ($item.hostname -like "*$kw*") { $score += 15 }
+        }
+        if ($score -gt 100) { $score = 100 }
+        $item.riskScore = $score
+        if ($score -ge 40) {
+            $item.tags = @($item.tags + 'risky-keyword') | Select-Object -Unique
+        }
+    }
+    return $Subdomains
+}
+
 function Invoke-ETMSubdomainDiscovery {
     param(
         [Parameter(Mandatory)][psobject]$Scope,
@@ -103,5 +145,6 @@ function Invoke-ETMSubdomainDiscovery {
 Export-ModuleMember -Function @(
     'Get-ETMSubdomainsFromCertificateTransparency',
     'Get-ETMSubdomainsFromDnsBruteforceLite',
+    'Merge-ETMSubdomainLists', 'Update-ETMSubdomainRiskScores',
     'Invoke-ETMSubdomainDiscovery'
 )

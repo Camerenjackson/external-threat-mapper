@@ -1,5 +1,32 @@
 # ApiManager.psm1 - Multi-provider API keys (DPAPI / env / container JSON)
 
+function Initialize-ETMDpapiSupport {
+    if ($script:ETMDpapiReady) { return }
+    $typeName = 'System.Security.Cryptography.ProtectedData'
+    if (([System.Management.Automation.PSTypeName]$typeName).Type) {
+        $script:ETMDpapiReady = $true
+        return
+    }
+    $loaded = $false
+    foreach ($asm in @('System.Security', 'System.Security.Cryptography.ProtectedData')) {
+        try {
+            Add-Type -AssemblyName $asm -ErrorAction Stop
+            if (([System.Management.Automation.PSTypeName]$typeName).Type) {
+                $loaded = $true
+                break
+            }
+        }
+        catch { }
+    }
+    if (-not $loaded) {
+        throw @'
+Could not load Windows DPAPI (System.Security.Cryptography.ProtectedData).
+Run on Windows with PowerShell 5.1+, or set environment variable ETM_USE_PLAIN_CREDENTIALS=1 for plain local storage (Docker/dev only).
+'@
+    }
+    $script:ETMDpapiReady = $true
+}
+
 function Test-ETMContainerMode {
     return [bool]($env:ETM_CONTAINER -eq '1' -or $env:ETM_USE_PLAIN_CREDENTIALS -eq '1')
 }
@@ -27,6 +54,7 @@ function Get-ETMProviderEnvVars {
 function Protect-ETMSecret {
     param([Parameter(Mandatory)][string]$PlainText)
     if (Test-ETMContainerMode) { return $PlainText }
+    Initialize-ETMDpapiSupport
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($PlainText)
     $enc = [System.Security.Cryptography.ProtectedData]::Protect(
         $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
@@ -39,6 +67,7 @@ function Unprotect-ETMSecret {
     if ([string]::IsNullOrWhiteSpace($ProtectedBase64)) { return '' }
     if (Test-ETMContainerMode) { return $ProtectedBase64 }
     try {
+        Initialize-ETMDpapiSupport
         $enc = [Convert]::FromBase64String($ProtectedBase64)
         $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
             $enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser
@@ -101,7 +130,7 @@ function Set-ETMApiCredential {
 
 $script:ETMThreatIntelProviderIds = @(
     'Shodan', 'VirusTotal', 'SecurityTrails', 'Censys', 'Urlscan',
-    'AlienVaultOTX', 'AbuseIPDB', 'GreyNoise', 'HIBP'
+    'AlienVaultOTX', 'AbuseIPDB', 'GreyNoise'
 )
 
 function Test-ETMApiConfigured {
@@ -258,10 +287,22 @@ function Test-ETMApiConnection {
                 return [pscustomobject]@{ Ok = $true; Message = 'OTX API reachable (key optional for low volume).' }
             }
             'HIBP' {
-                $h = @{ 'hibp-api-key' = $key; 'User-Agent' = 'ExternalThreatMapper-Defensive' }
-                $breaches = Invoke-RestMethod -Uri 'https://haveibeenpwned.com/api/v3/breaches' -Headers $h -TimeoutSec 20
-                $n = @($breaches).Count
-                return [pscustomobject]@{ Ok = $true; Message = "HIBP connected ($n breaches in catalog)." }
+                $r = Invoke-ETMHibpApi -Path 'subscribedDomains' -ApiKey $key -TimeoutSec 25
+                if ($r.Ok) {
+                    $domains = @($r.Json)
+                    $n = $domains.Count
+                    $names = ($domains | ForEach-Object { $_.DomainName } | Select-Object -First 3) -join ', '
+                    $hint = if ($n -gt 0) {
+                        " $n verified domain(s) on subscription ($names$(if ($n -gt 3) { '...' } else { ''}))."
+                    } else {
+                        ' No verified domains yet — add your corp domain in the HIBP dashboard before domain breach search.'
+                    }
+                    return [pscustomobject]@{ Ok = $true; Message = "HIBP API key valid (domain search ready).$hint" }
+                }
+                if ($r.StatusCode -eq 401) {
+                    return [pscustomobject]@{ Ok = $false; Message = 'Invalid HIBP API key.' }
+                }
+                return [pscustomobject]@{ Ok = $false; Message = if ($r.Message) { $r.Message } else { "HIBP test failed (HTTP $($r.StatusCode))." } }
             }
             default {
                 return [pscustomobject]@{ Ok = $false; Message = "Unknown provider: $Provider" }

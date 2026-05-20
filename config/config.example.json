@@ -10,6 +10,12 @@
     "viewMode": "Analyst",
     "allowAiSummaries": false
   },
+  "threatIntel": {
+    "maxIpLookups": 8,
+    "maxHostnameLookups": 6,
+    "maxShodanHostLookups": 5,
+    "apiDelayMs": 400
+  },
   "storage": {
     "preferSqlite": true,
     "dataDirectory": "data",
