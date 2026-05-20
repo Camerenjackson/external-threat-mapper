@@ -54,7 +54,7 @@ function Get-ETMSqlConnectionString {
         $builder['Integrated Security'] = $false
         $builder['User ID'] = [string]$sql.userId
         $pwd = Get-ETMApiSecret -Name 'SqlPassword'
-        if (-not $pwd) { throw 'SQL password not configured. Save it under History & Data.' }
+        if (-not $pwd) { throw 'SQL password not configured. Enter it on the SQL Database tab and click Connect.' }
         $builder['Password'] = $pwd
     }
     return $builder.ConnectionString
@@ -87,13 +87,38 @@ CREATE TABLE ETM_Scans (
     finally { $conn.Close() }
 }
 
-function Test-ETMSqlConnection {
-  try {
-        $cs = Get-ETMSqlConnectionString
-        if (-not $cs) {
-            return [pscustomobject]@{ Ok = $false; Message = 'SQL storage is disabled in config.' }
+function Build-ETMSqlConnectionString {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][string]$Database,
+        [bool]$IntegratedSecurity = $true,
+        [string]$UserId = '',
+        [string]$PlainPassword = '',
+        [bool]$TrustServerCertificate = $true
+    )
+    $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
+    $builder['Data Source'] = $Server
+    $builder['Initial Catalog'] = $Database
+    $builder['TrustServerCertificate'] = $TrustServerCertificate
+    if ($IntegratedSecurity) {
+        $builder['Integrated Security'] = $true
+    }
+    else {
+        $builder['Integrated Security'] = $false
+        $builder['User ID'] = $UserId
+        if (-not $PlainPassword) {
+            $PlainPassword = Get-ETMApiSecret -Name 'SqlPassword'
         }
-        $conn = New-Object System.Data.SqlClient.SqlConnection($cs)
+        if (-not $PlainPassword) { throw 'SQL password is required for SQL authentication.' }
+        $builder['Password'] = $PlainPassword
+    }
+    return $builder.ConnectionString
+}
+
+function Test-ETMSqlConnectionString {
+    param([Parameter(Mandatory)][string]$ConnectionString)
+    try {
+        $conn = New-Object System.Data.SqlClient.SqlConnection($ConnectionString)
         $conn.Open()
         $conn.Close()
         return [pscustomobject]@{ Ok = $true; Message = 'SQL Server connection successful.' }
@@ -101,6 +126,85 @@ function Test-ETMSqlConnection {
     catch {
         return [pscustomobject]@{ Ok = $false; Message = $_.Exception.Message }
     }
+}
+
+function Test-ETMSqlConnection {
+    try {
+        $cs = Get-ETMSqlConnectionString
+        if (-not $cs) {
+            return [pscustomobject]@{ Ok = $false; Message = 'SQL sync is not enabled. Connect from the SQL Database tab.' }
+        }
+        return Test-ETMSqlConnectionString -ConnectionString $cs
+    }
+    catch {
+        return [pscustomobject]@{ Ok = $false; Message = $_.Exception.Message }
+    }
+}
+
+function Connect-ETMSqlServer {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [Parameter(Mandatory)][string]$Database,
+        [bool]$IntegratedSecurity = $true,
+        [string]$UserId = '',
+        [string]$PlainPassword = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
+        return [pscustomobject]@{ Ok = $false; Message = 'Enter server and database name.' }
+    }
+    Save-ETMSqlSettings -Enabled $true -Server $Server.Trim() -Database $Database.Trim() `
+        -IntegratedSecurity $IntegratedSecurity -UserId $UserId.Trim() -PlainPassword $PlainPassword
+    try {
+        $cs = Build-ETMSqlConnectionString -Server $Server -Database $Database `
+            -IntegratedSecurity $IntegratedSecurity -UserId $UserId -PlainPassword $PlainPassword
+    }
+    catch {
+        return [pscustomobject]@{ Ok = $false; Message = $_.Exception.Message }
+    }
+    $test = Test-ETMSqlConnectionString -ConnectionString $cs
+    if (-not $test.Ok) { return $test }
+    try {
+        Initialize-ETMSqlSchema -ConnectionString $cs
+        return [pscustomobject]@{
+            Ok      = $true
+            Message = "Connected to $Server / $Database. Database tools are now available."
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Ok = $false; Message = "Connected but schema setup failed: $($_.Exception.Message)" }
+    }
+}
+
+function Get-ETMSqlScanSummaries {
+    $cs = Get-ETMSqlConnectionString
+    if (-not $cs) { return @() }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $conn = New-Object System.Data.SqlClient.SqlConnection($cs)
+    $conn.Open()
+    try {
+        $cmd = $conn.CreateCommand()
+        $cmd.CommandText = @"
+SELECT TOP 50 ScanId, Domain, Organization, ScanMode, Status, TotalScore, FindingCount, CompletedUtc
+FROM ETM_Scans
+ORDER BY CompletedUtc DESC;
+"@
+        $reader = $cmd.ExecuteReader()
+        while ($reader.Read()) {
+            $rows.Add([pscustomobject]@{
+                    scanId       = [string]$reader['ScanId']
+                    domain       = [string]$reader['Domain']
+                    organization = [string]$reader['Organization']
+                    scanMode     = [string]$reader['ScanMode']
+                    status       = [string]$reader['Status']
+                    totalScore   = if ($reader['TotalScore'] -is [DBNull]) { 0 } else { [int]$reader['TotalScore'] }
+                    findingCount = if ($reader['FindingCount'] -is [DBNull]) { 0 } else { [int]$reader['FindingCount'] }
+                    completedUtc = if ($reader['CompletedUtc'] -is [DBNull]) { '' } else { ([datetime]$reader['CompletedUtc']).ToString('o') }
+                })
+        }
+        $reader.Close()
+    }
+    finally { $conn.Close() }
+    return ,@($rows.ToArray())
 }
 
 function Save-ETMScanToSql {
@@ -260,5 +364,6 @@ function Save-ETMSqlSettings {
 Export-ModuleMember -Function @(
     'Get-ETMHistoryDirectory', 'Save-ETMScanHistory', 'Get-ETMScanHistoryList',
     'Import-ETMScanFromHistory', 'Clear-ETMScanHistory', 'Test-ETMSqlConnection',
-    'Save-ETMSqlSettings', 'Get-ETMSqlSettings', 'Initialize-ETMSqlSchema'
+    'Test-ETMSqlConnectionString', 'Connect-ETMSqlServer', 'Build-ETMSqlConnectionString',
+    'Save-ETMSqlSettings', 'Get-ETMSqlSettings', 'Initialize-ETMSqlSchema', 'Get-ETMSqlScanSummaries'
 )

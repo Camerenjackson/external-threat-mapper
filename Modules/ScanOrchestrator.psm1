@@ -129,10 +129,10 @@ function Start-ETMExternalScan {
 
     $scanResult = [pscustomobject]@{
         scanId       = $scanId
-        subdomains   = $subs
-        webServices  = $web
-        threatIntel  = $intelRows
-        findings     = $findings
+        subdomains   = [object[]]@($subs)
+        webServices  = [object[]]@($web)
+        threatIntel  = [object[]]@(ConvertTo-ETMObjectList $intelRows)
+        findings     = [object[]]@(ConvertTo-ETMObjectList $findings)
         score        = $score
     }
     try {

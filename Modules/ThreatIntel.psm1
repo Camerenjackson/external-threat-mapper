@@ -253,13 +253,13 @@ function Invoke-ETMThreatIntelEnrichment {
         $all.AddRange(@(Invoke-ETMGreyNoiseIpIntel -Ip $ip -ApiKey $grey))
     }
 
-    return $all.ToArray()
+    return ,@($all.ToArray())
 }
 
 function Convert-ETMThreatIntelToFindings {
-    param([Parameter(Mandatory)][array]$IntelRows)
+    param($IntelRows)
     $findings = [System.Collections.Generic.List[object]]::new()
-    foreach ($row in $IntelRows) {
+    foreach ($row in (ConvertTo-ETMObjectList $IntelRows)) {
         $findings.Add([pscustomobject]@{
                 title                = "[$($row.provider)] $($row.summary)"
                 severity             = $row.severity

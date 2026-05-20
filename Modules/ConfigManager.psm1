@@ -111,6 +111,27 @@ function ConvertTo-ETMObjectList {
     return $list
 }
 
+function Set-ETMDataGridSource {
+    <#
+    .SYNOPSIS
+    Binds scan rows to a WPF DataGrid without the single-item PSCustomObject unwrap bug.
+    #>
+    param(
+        [Parameter(Mandatory)]$Grid,
+        $Items
+    )
+    $list = ConvertTo-ETMObjectList $Items
+    $arr = [object[]]@($list)
+    $Grid.ItemsSource = $null
+    if ($arr.Length -eq 0) {
+        $oc = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
+    }
+    else {
+        $oc = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]' (,$arr)
+    }
+    $Grid.ItemsSource = $oc
+}
+
 function Import-ETMScanResultJson {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path $Path)) { throw "File not found: $Path" }
@@ -128,5 +149,5 @@ function Import-ETMScanResultJson {
 Export-ModuleMember -Function @(
     'Get-ETMProjectRoot', 'Get-ETMConfigPath', 'Get-ETMAppConfig', 'Save-ETMAppConfig',
     'Import-ETMScopeFile', 'Export-ETMScopeFile', 'New-ETMScopeObject', 'Test-ETMTargetAuthorized',
-    'ConvertTo-ETMObjectList', 'Import-ETMScanResultJson'
+    'ConvertTo-ETMObjectList', 'Set-ETMDataGridSource', 'Import-ETMScanResultJson'
 )

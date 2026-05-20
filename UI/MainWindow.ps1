@@ -27,6 +27,7 @@ function Show-ETMMainWindow {
         Discovery   = $window.FindName('PageDiscovery')
         Intel       = $window.FindName('PageIntel')
         Integrations = $window.FindName('PageIntegrations')
+        Sql         = $window.FindName('PageSql')
         History     = $window.FindName('PageHistory')
         Reports     = $window.FindName('PageReports')
     }
@@ -36,7 +37,8 @@ function Show-ETMMainWindow {
         Discovery   = 'Discovery'
         Intel       = 'Threat intelligence'
         Integrations = 'API integrations'
-        History     = 'History and database'
+        Sql         = 'SQL Database'
+        History     = 'Local scan history'
         Reports     = 'Reports and activity'
     }
 
@@ -50,6 +52,7 @@ function Show-ETMMainWindow {
         scanJob     = $null
         scanTimer   = $null
         cancelSync  = $null
+        sqlConnected = $false
         discoveryRows = @()
         apiFields   = @{}
     }
@@ -135,7 +138,7 @@ function Show-ETMMainWindow {
                 $rows = $filtered
             }
         }
-        (& $get 'GridDiscovery').ItemsSource = $rows
+        Set-ETMDataGridSource -Grid (& $get 'GridDiscovery') -Items $rows
     }
 
     function Update-CategoryGrid {
@@ -163,8 +166,8 @@ function Show-ETMMainWindow {
         (& $get 'TxtFindingCount').Text = [string]$findings.Count
         (& $get 'TxtAssetCount').Text = [string]($subs.Count + $web.Count)
         (& $get 'TxtIntelCount').Text = [string]$intel.Count
-        (& $get 'GridFindings').ItemsSource = $findings
-        (& $get 'GridIntel').ItemsSource = $intel
+        Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items $findings
+        Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items $intel
         $state.discoveryRows = Build-DiscoveryRows $result
         Apply-DiscoveryFilter
     }
@@ -178,10 +181,10 @@ function Show-ETMMainWindow {
         (& $get 'TxtFindingCount').Text = '0'
         (& $get 'TxtAssetCount').Text = '0'
         (& $get 'TxtIntelCount').Text = '0'
-        (& $get 'GridFindings').ItemsSource = @()
-        (& $get 'GridIntel').ItemsSource = @()
+        Set-ETMDataGridSource -Grid (& $get 'GridFindings') -Items @()
+        Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items @()
         $state.discoveryRows = @()
-        (& $get 'GridDiscovery').ItemsSource = @()
+        Set-ETMDataGridSource -Grid (& $get 'GridDiscovery') -Items @()
         (& $get 'TxtStatus').Text = $StatusText
         (& $get 'ScanProgress').Value = 0
         (& $get 'TxtProgressMsg').Text = ''
@@ -358,7 +361,15 @@ Do you confirm authorization?
 
     function Refresh-HistoryGrid {
         $items = @(Get-ETMScanHistoryList)
-        (& $get 'GridHistory').ItemsSource = (ConvertTo-ETMObjectList $items)
+        Set-ETMDataGridSource -Grid (& $get 'GridHistory') -Items $items
+    }
+
+    function Get-SqlPasswordFromForm {
+        $sec = (& $get 'PwdSql').SecurePassword
+        if ($sec.Length -eq 0) { return '' }
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+        try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
     }
 
     function Load-SqlFormFromConfig {
@@ -369,7 +380,35 @@ Do you confirm authorization?
         (& $get 'ChkSqlIntegrated').IsChecked = [bool]($sql.integratedSecurity -ne $false)
         (& $get 'TxtSqlUser').Text = [string]$sql.userId
         if (Get-ETMApiSecret -Name 'SqlPassword') {
-            (& $get 'TxtSqlStatus').Text = 'SQL password saved (hidden).'
+            (& $get 'TxtSqlConnectStatus').Text = 'Saved password on file (re-enter to change).'
+        }
+    }
+
+    function Update-SqlTabAccess {
+        $connected = [bool]$state.sqlConnected
+        (& $get 'SqlLockedOverlay').Visibility = if ($connected) { 'Collapsed' } else { 'Visible' }
+        (& $get 'SqlWorkspace').Visibility = if ($connected) { 'Visible' } else { 'Collapsed' }
+        (& $get 'BtnSqlDisconnect').Visibility = if ($connected) { 'Visible' } else { 'Collapsed' }
+        if ($connected) {
+            $srv = (& $get 'TxtSqlServer').Text.Trim()
+            $db = (& $get 'TxtSqlDatabase').Text.Trim()
+            (& $get 'TxtSqlConnectedBanner').Text = "Connected to $srv / $db"
+        }
+    }
+
+    function Refresh-SqlGrid {
+        if (-not $state.sqlConnected) { return }
+        try {
+            $rows = @(Get-ETMSqlScanSummaries)
+            Set-ETMDataGridSource -Grid (& $get 'GridSqlScans') -Items $rows
+            (& $get 'TxtSqlWorkspaceStatus').Text = if ($rows.Count -gt 0) {
+                "$($rows.Count) scan(s) in SQL database."
+            } else {
+                'No scans in database yet. Complete a scan with sync enabled.'
+            }
+        }
+        catch {
+            (& $get 'TxtSqlWorkspaceStatus').Text = "Could not read SQL scans: $($_.Exception.Message)"
         }
     }
 
@@ -390,6 +429,13 @@ Do you confirm authorization?
     Show-Page 'Dashboard'
     Build-IntegrationsUi
     Load-SqlFormFromConfig
+    Update-SqlTabAccess
+    $pwdSql = & $get 'PwdSql'
+    if ($pwdSql) {
+        $pwdSql.Background = & $UiBrush '#0A0E14'
+        $pwdSql.Foreground = & $UiBrush '#EEF2F8'
+        $pwdSql.BorderBrush = & $UiBrush '#263041'
+    }
     Refresh-HistoryGrid
     Append-LogUi 'Ready. Connect APIs under Integrations, set target, then Run scan.'
     Restore-LastScanIfAny
@@ -400,7 +446,16 @@ Do you confirm authorization?
 
     (& $get 'NavList').Add_SelectionChanged({
         $item = (& $get 'NavList').SelectedItem
-        if ($item -and $item.Tag) { Show-Page $item.Tag }
+        if ($item -and $item.Tag) {
+            $tag = [string]$item.Tag
+            if ($tag -eq 'Sql' -and -not $state.sqlConnected) {
+                Show-Page 'Sql'
+                (& $get 'TxtStatus').Text = 'Enter SQL Server details and click Connect to unlock database tools.'
+                return
+            }
+            Show-Page $tag
+            if ($tag -eq 'Sql' -and $state.sqlConnected) { Refresh-SqlGrid }
+        }
     })
 
     (& $get 'CmbDiscoveryFilter').Add_SelectionChanged({ Apply-DiscoveryFilter })
@@ -449,29 +504,65 @@ Do you confirm authorization?
         Append-LogUi 'Local scan history cleared.'
     }
 
-    Register-ETMUiClick -Control (& $get 'BtnSaveSql') -Context 'Save SQL settings' -OnLog $uiLog -Handler {
-        $pwd = ''
-        $sec = (& $get 'PwdSql').SecurePassword
-        if ($sec.Length -gt 0) {
-            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
-            try { $pwd = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); (& $get 'PwdSql').Clear() }
-        }
-        Save-ETMSqlSettings -Enabled (& $get 'ChkSqlEnabled').IsChecked `
+    Register-ETMUiClick -Control (& $get 'BtnSqlConnect') -Context 'Connect SQL' -OnLog $uiLog -Handler {
+        (& $get 'TxtSqlConnectStatus').Text = 'Connecting...'
+        $pwd = Get-SqlPasswordFromForm
+        $r = Connect-ETMSqlServer `
             -Server (& $get 'TxtSqlServer').Text.Trim() `
             -Database (& $get 'TxtSqlDatabase').Text.Trim() `
             -IntegratedSecurity (& $get 'ChkSqlIntegrated').IsChecked `
             -UserId (& $get 'TxtSqlUser').Text.Trim() `
             -PlainPassword $pwd
-        (& $get 'TxtSqlStatus').Text = 'SQL settings saved.'
-        Append-LogUi 'SQL connection settings saved.'
+        if ($pwd) { (& $get 'PwdSql').Clear() }
+        (& $get 'TxtSqlConnectStatus').Text = $r.Message
+        if ($r.Ok) {
+            $state.sqlConnected = $true
+            (& $get 'ChkSqlEnabled').IsChecked = $true
+            Update-SqlTabAccess
+            Refresh-SqlGrid
+            Append-LogUi 'SQL Server connected.'
+        }
+        else {
+            $state.sqlConnected = $false
+            Update-SqlTabAccess
+            Append-LogUi "SQL connect failed: $($r.Message)"
+        }
     }
 
-    Register-ETMUiClick -Control (& $get 'BtnTestSql') -Context 'Test SQL' -OnLog $uiLog -Handler {
-        (& $get 'TxtSqlStatus').Text = 'Testing SQL connection...'
-        $t = Test-ETMSqlConnection
-        (& $get 'TxtSqlStatus').Text = $t.Message
-        Append-LogUi "SQL test: $($t.Message)"
+    Register-ETMUiClick -Control (& $get 'BtnSqlDisconnect') -Context 'Disconnect SQL' -OnLog $uiLog -Handler {
+        $state.sqlConnected = $false
+        Save-ETMSqlSettings -Enabled $false `
+            -Server (& $get 'TxtSqlServer').Text.Trim() `
+            -Database (& $get 'TxtSqlDatabase').Text.Trim() `
+            -IntegratedSecurity (& $get 'ChkSqlIntegrated').IsChecked `
+            -UserId (& $get 'TxtSqlUser').Text.Trim()
+        Update-SqlTabAccess
+        Set-ETMDataGridSource -Grid (& $get 'GridSqlScans') -Items @()
+        (& $get 'TxtSqlConnectStatus').Text = 'Disconnected. Database tools are locked until you connect again.'
+        Append-LogUi 'SQL disconnected.'
+    }
+
+    Register-ETMUiClick -Control (& $get 'BtnSqlSaveSync') -Context 'Save SQL sync preference' -OnLog $uiLog -Handler {
+        if (-not $state.sqlConnected) {
+            [System.Windows.MessageBox]::Show('Connect to SQL Server first.', 'SQL') | Out-Null
+            return
+        }
+        Save-ETMSqlSettings -Enabled (& $get 'ChkSqlEnabled').IsChecked `
+            -Server (& $get 'TxtSqlServer').Text.Trim() `
+            -Database (& $get 'TxtSqlDatabase').Text.Trim() `
+            -IntegratedSecurity (& $get 'ChkSqlIntegrated').IsChecked `
+            -UserId (& $get 'TxtSqlUser').Text.Trim()
+        (& $get 'TxtSqlWorkspaceStatus').Text = 'Sync preference saved.'
+        Append-LogUi "SQL auto-sync: $((& $get 'ChkSqlEnabled').IsChecked)"
+    }
+
+    Register-ETMUiClick -Control (& $get 'BtnSqlRefresh') -Context 'Refresh SQL scans' -OnLog $uiLog -Handler {
+        if (-not $state.sqlConnected) {
+            [System.Windows.MessageBox]::Show('Connect to SQL Server first.', 'SQL') | Out-Null
+            return
+        }
+        Refresh-SqlGrid
+        Append-LogUi 'SQL scan list refreshed.'
     }
 
     Register-ETMUiClick -Control (& $get 'BtnSaveScope') -Context 'Save scope' -OnLog $uiLog -Handler {
@@ -603,6 +694,7 @@ Do you confirm authorization?
                         (& $get 'TxtStatus').Text = "Complete - score $sc, $fc findings, $ic intel rows."
                         Append-LogUi 'Scan finished.'
                         Refresh-HistoryGrid
+                        if ($state.sqlConnected) { Refresh-SqlGrid }
                         Show-Page 'Dashboard'
                     }
                     else {
