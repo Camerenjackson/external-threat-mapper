@@ -52,10 +52,6 @@ On **Target**, you set the **organization**, **primary domain**, and **scan mode
 
 **HIBP seed emails** (optional): corporate scans use HIBP domain search for `@yourdomain` aliases when the domain is verified in your HIBP subscription; you can add up to five specific emails if you are authorized to check them. **Save scope** / **Load scope** persist settings locally (not in git).
 
-<p align="center">
-  <img src="docs/screenshots/screenshot-target.png" alt="ETM Target tab — organization, domain, scan mode, and authorization" width="920"/>
-</p>
-
 ---
 
 ### Integrations — API keys with guidance
