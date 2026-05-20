@@ -258,8 +258,10 @@ function Invoke-ETMThreatIntelEnrichment {
 
 function Convert-ETMThreatIntelToFindings {
     param($IntelRows)
+    $rows = ConvertTo-ETMObjectList $IntelRows
+    if ($rows.Count -eq 0) { return @() }
     $findings = [System.Collections.Generic.List[object]]::new()
-    foreach ($row in (ConvertTo-ETMObjectList $IntelRows)) {
+    foreach ($row in $rows) {
         $findings.Add([pscustomobject]@{
                 title                = "[$($row.provider)] $($row.summary)"
                 severity             = $row.severity
@@ -273,7 +275,7 @@ function Convert-ETMThreatIntelToFindings {
                 intelProvider        = $row.provider
             })
     }
-    return $findings.ToArray()
+    return ,@($findings.ToArray())
 }
 
 Export-ModuleMember -Function @(

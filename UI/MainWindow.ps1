@@ -57,13 +57,6 @@ function Show-ETMMainWindow {
         apiFields   = @{}
     }
 
-    # Brush helper in this window scope so WPF click handlers can always find it.
-    $UiBrush = {
-        param([Parameter(Mandatory)][string]$Hex)
-        [System.Windows.Media.SolidColorBrush]::new(
-            ([System.Windows.Media.ColorConverter]::ConvertFromString($Hex)))
-    }
-
     function Show-Page {
         param([string]$Key)
         foreach ($k in $pages.Keys) {
@@ -148,6 +141,7 @@ function Show-ETMMainWindow {
 
     function Update-Ui {
         param($result)
+        $result = Normalize-ETMScanResult $result
         $state.lastResult = $result
         $findings = ConvertTo-ETMObjectList $result.findings
         $subs = ConvertTo-ETMObjectList $result.subdomains
@@ -267,9 +261,9 @@ Do you confirm authorization?
         $pwd = New-Object System.Windows.Controls.PasswordBox
         $pwd.Height = 32
         $pwd.Margin = '0,0,0,8'
-        $pwd.Background = & $UiBrush '#0A0E14'
-        $pwd.Foreground = & $UiBrush '#EEF2F8'
-        $pwd.BorderBrush = & $UiBrush '#263041'
+        $pwd.Background = New-ETMUiBrush '#0A0E14'
+        $pwd.Foreground = New-ETMUiBrush '#EEF2F8'
+        $pwd.BorderBrush = New-ETMUiBrush '#263041'
         $existing = Get-ETMApiSecret -Name $Provider.id
         if ($existing) { $pwd.Tag = 'configured' }
         $row = New-Object System.Windows.Controls.StackPanel
@@ -299,7 +293,7 @@ Do you confirm authorization?
             $sec = $pwd.SecurePassword
             if ($sec.Length -eq 0) {
                 $status.Text = 'Paste an API key first.'
-                $status.Foreground = & $UiBrush '#F0B429'
+                $status.Foreground = New-ETMUiBrush '#F0B429'
                 return
             }
             $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
@@ -313,7 +307,7 @@ Do you confirm authorization?
                 $pwd.Clear()
             }
             $status.Text = 'Saved securely.'
-            $status.Foreground = & $UiBrush '#3DD68C'
+            $status.Foreground = New-ETMUiBrush '#3DD68C'
             Append-LogUi "API key saved: $providerId"
         }.GetNewClosure()
         Register-ETMUiClick -Control $btnTest -Context "Test API $providerId" -OnLog $logFn -Handler {
@@ -327,15 +321,15 @@ Do you confirm authorization?
             }
             elseif (-not $stored) {
                 $status.Text = 'No API key configured. Enter a key above, then Test or Save.'
-                $status.Foreground = & $UiBrush '#F0B429'
+                $status.Foreground = New-ETMUiBrush '#F0B429'
                 Append-LogUi "[$providerId] Skipped - no key."
                 return
             }
             $status.Text = 'Testing connection...'
-            $status.Foreground = & $UiBrush '#F0B429'
+            $status.Foreground = New-ETMUiBrush '#F0B429'
             $t = Test-ETMApiConnection -Provider $providerId
             $status.Text = $t.Message
-            $status.Foreground = if ($t.Ok) { & $UiBrush '#3DD68C' } else { & $UiBrush '#F85149' }
+            $status.Foreground = if ($t.Ok) { New-ETMUiBrush '#3DD68C' } else { New-ETMUiBrush '#F85149' }
             Append-LogUi "[$providerId] $($t.Message)"
         }.GetNewClosure()
         [void]$row.Children.Add($btnSave)
@@ -417,12 +411,16 @@ Do you confirm authorization?
         if ($list.Count -eq 0) { return }
         try {
             $last = $list[0]
-            Update-Ui (Import-ETMScanFromHistory -ScanId $last.scanId)
+            $scanId = [string]$last.scanId
+            if ([string]::IsNullOrWhiteSpace($scanId)) { return }
+            $loaded = Import-ETMScanFromHistory -ScanId $scanId
+            Update-Ui $loaded
+            $state.isDemo = $false
             (& $get 'TxtStatus').Text = "Restored last scan: $($last.domain) ($($last.startedUtc))"
             Append-LogUi "Restored history: $($last.domain)"
         }
         catch {
-            Append-LogUi 'Could not restore last scan from history.'
+            Append-LogUi "Could not restore last scan: $($_.Exception.Message)"
         }
     }
 
@@ -432,9 +430,9 @@ Do you confirm authorization?
     Update-SqlTabAccess
     $pwdSql = & $get 'PwdSql'
     if ($pwdSql) {
-        $pwdSql.Background = & $UiBrush '#0A0E14'
-        $pwdSql.Foreground = & $UiBrush '#EEF2F8'
-        $pwdSql.BorderBrush = & $UiBrush '#263041'
+        $pwdSql.Background = New-ETMUiBrush '#0A0E14'
+        $pwdSql.Foreground = New-ETMUiBrush '#EEF2F8'
+        $pwdSql.BorderBrush = New-ETMUiBrush '#263041'
     }
     Refresh-HistoryGrid
     Append-LogUi 'Ready. Connect APIs under Integrations, set target, then Run scan.'
@@ -466,7 +464,7 @@ Do you confirm authorization?
             [System.Windows.MessageBox]::Show('Demo file missing.', 'Demo') | Out-Null
             return
         }
-        $demo = Import-ETMScanResultJson -Path $demoPath
+        $demo = Normalize-ETMScanResult (Import-ETMScanResultJson -Path $demoPath)
         $state.isDemo = $true
         Update-Ui $demo
         (& $get 'TxtOrg').Text = 'Demo Corp'
@@ -487,11 +485,25 @@ Do you confirm authorization?
             [System.Windows.MessageBox]::Show('Select a scan in the history table first.', 'History') | Out-Null
             return
         }
-        $id = $grid.SelectedItem.scanId
-        Update-Ui (Import-ETMScanFromHistory -ScanId $id)
+        $row = $grid.SelectedItem
+        $id = [string]$row.scanId
+        if ([string]::IsNullOrWhiteSpace($id)) {
+            [System.Windows.MessageBox]::Show('Selected row has no scan ID.', 'History') | Out-Null
+            return
+        }
+        $loaded = Import-ETMScanFromHistory -ScanId $id
+        $state.isDemo = $false
+        Update-Ui $loaded
+        if ($loaded.scope) {
+            if ($loaded.scope.organizationName) { (& $get 'TxtOrg').Text = [string]$loaded.scope.organizationName }
+            if ($loaded.scope.primaryDomain) { (& $get 'TxtDomain').Text = [string]$loaded.scope.primaryDomain }
+            if ($null -ne $loaded.scope.authorizationAcknowledged) {
+                (& $get 'ChkAuthorized').IsChecked = [bool]$loaded.scope.authorizationAcknowledged
+            }
+        }
         (& $get 'TxtStatus').Text = "Loaded scan $id from history."
         Show-Page 'Dashboard'
-        Append-LogUi "Loaded history scan $id"
+        Append-LogUi "Loaded history scan $id ($((ConvertTo-ETMObjectList $loaded.findings).Count) findings)."
     }
 
     Register-ETMUiClick -Control (& $get 'BtnClearHistory') -Context 'Clear history' -OnLog $uiLog -Handler {
@@ -599,7 +611,7 @@ Do you confirm authorization?
             if ($state.apiFields.ContainsKey($r.id)) {
                 $st = $state.apiFields[$r.id].Status
                 $st.Text = $r.message
-                $st.Foreground = if ($r.ok) { & $UiBrush '#3DD68C' } else { & $UiBrush '#F85149' }
+                $st.Foreground = if ($r.ok) { New-ETMUiBrush '#3DD68C' } else { New-ETMUiBrush '#F85149' }
             }
             Append-LogUi "[$($r.id)] $($r.message)"
         }
@@ -687,7 +699,7 @@ Do you confirm authorization?
                     (& $get 'ScanProgress').Value = 100
                     (& $get 'BtnCancelScan').Visibility = 'Collapsed'
                     if ($result) {
-                        Update-Ui $result
+                        Update-Ui (Normalize-ETMScanResult $result)
                         $ic = (ConvertTo-ETMObjectList $result.threatIntel).Count
                         $fc = (ConvertTo-ETMObjectList $result.findings).Count
                         $sc = if ($result.score) { $result.score.TotalScore } else { '--' }

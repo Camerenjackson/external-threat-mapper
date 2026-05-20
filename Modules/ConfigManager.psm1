@@ -90,23 +90,43 @@ function Test-ETMTargetAuthorized {
 function ConvertTo-ETMObjectList {
     <#
     .SYNOPSIS
-    Ensures WPF ItemsSource always gets a list. Fixes ConvertFrom-Json single-element array unwrap.
+    Ensures collections are real lists. PSCustomObject implements IEnumerable but must stay one row.
     #>
     param($InputObject)
     $list = [System.Collections.Generic.List[object]]::new()
     if ($null -eq $InputObject) { return $list }
+
+    if ($InputObject -is [string]) {
+        [void]$list.Add($InputObject)
+        return $list
+    }
+
+  # Never enumerate a scan row object (fixes threat-intel / history load ItemsSource errors).
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        [void]$list.Add($InputObject)
+        return $list
+    }
+
     if ($InputObject -is [System.Array]) {
         foreach ($item in $InputObject) { if ($null -ne $item) { [void]$list.Add($item) } }
         return $list
     }
-    if ($InputObject -is [System.Collections.IList] -and $InputObject -isnot [string]) {
+
+    if ($InputObject -is [System.Collections.IList]) {
         foreach ($item in $InputObject) { if ($null -ne $item) { [void]$list.Add($item) } }
         return $list
     }
-    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+
+    if ($InputObject -is [System.Collections.Generic.List[object]]) {
+        foreach ($item in $InputObject) { if ($null -ne $item) { [void]$list.Add($item) } }
+        return $list
+    }
+
+    if ($InputObject -is [System.Collections.IEnumerable]) {
         foreach ($item in $InputObject) { if ($null -ne $item) { [void]$list.Add($item) } }
         if ($list.Count -gt 0) { return $list }
     }
+
     [void]$list.Add($InputObject)
     return $list
 }
@@ -114,40 +134,57 @@ function ConvertTo-ETMObjectList {
 function Set-ETMDataGridSource {
     <#
     .SYNOPSIS
-    Binds scan rows to a WPF DataGrid without the single-item PSCustomObject unwrap bug.
+    Binds rows to a WPF DataGrid (always a list, never a single PSCustomObject).
     #>
     param(
         [Parameter(Mandatory)]$Grid,
         $Items
     )
     $list = ConvertTo-ETMObjectList $Items
-    $arr = [object[]]@($list)
     $Grid.ItemsSource = $null
-    if ($arr.Length -eq 0) {
-        $oc = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
+    $bound = New-Object System.Collections.ArrayList
+    foreach ($item in $list) { [void]$bound.Add($item) }
+    $Grid.ItemsSource = $bound
+}
+
+function ConvertTo-ETMObjectArray {
+    param($InputObject)
+    $list = ConvertTo-ETMObjectList $InputObject
+    if ($list.Count -eq 0) { return @() }
+    $arr = New-Object object[] $list.Count
+    for ($i = 0; $i -lt $list.Count; $i++) { $arr[$i] = $list[$i] }
+    return $arr
+}
+
+function Normalize-ETMScanResult {
+    <#
+    .SYNOPSIS
+    Forces scan payload arrays so JSON/history/job results never unwrap to a single object.
+    #>
+    param($Result)
+    if (-not $Result) { return $null }
+    $out = [pscustomobject]@{
+        scanId      = $Result.scanId
+        score       = $Result.score
+        scope       = $Result.scope
+        savedUtc    = $Result.savedUtc
+        findings    = ConvertTo-ETMObjectArray $Result.findings
+        subdomains  = ConvertTo-ETMObjectArray $Result.subdomains
+        webServices = ConvertTo-ETMObjectArray $Result.webServices
+        threatIntel = ConvertTo-ETMObjectArray $Result.threatIntel
     }
-    else {
-        $oc = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]' (,$arr)
-    }
-    $Grid.ItemsSource = $oc
+    return $out
 }
 
 function Import-ETMScanResultJson {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path $Path)) { throw "File not found: $Path" }
     $raw = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($name in @('findings', 'subdomains', 'webServices', 'threatIntel')) {
-        if ($null -ne $raw.PSObject.Properties[$name]) {
-            $list = ConvertTo-ETMObjectList $raw.$name
-            $raw.PSObject.Properties.Remove($name)
-            $raw | Add-Member -NotePropertyName $name -NotePropertyValue $list -Force
-        }
-    }
-    return $raw
+    return Normalize-ETMScanResult $raw
 }
 
 Export-ModuleMember -Function @(
     'Get-ETMProjectRoot', 'Get-ETMConfigPath', 'Get-ETMAppConfig', 'Save-ETMAppConfig',
     'Import-ETMScopeFile', 'Export-ETMScopeFile', 'New-ETMScopeObject', 'Test-ETMTargetAuthorized',
-    'ConvertTo-ETMObjectList', 'Set-ETMDataGridSource', 'Import-ETMScanResultJson'
+    'ConvertTo-ETMObjectList', 'ConvertTo-ETMObjectArray', 'Set-ETMDataGridSource', 'Normalize-ETMScanResult', 'Import-ETMScanResultJson'
 )

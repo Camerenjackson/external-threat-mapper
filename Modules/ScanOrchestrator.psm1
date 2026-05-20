@@ -85,8 +85,10 @@ function Start-ETMExternalScan {
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
         $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips)
-        $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows $intelRows)
-        foreach ($f in $intelFindings) { $findings.Add($f) }
+        if ($intelRows -and $intelRows.Count -gt 0) {
+            $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows @($intelRows))
+            foreach ($f in $intelFindings) { $findings.Add($f) }
+        }
     }
 
     & $ProgressCallback 75 'GitHub metadata search...'
@@ -127,14 +129,14 @@ function Start-ETMExternalScan {
     & $ProgressCallback 100 'Complete'
     Write-ETMLog -Level AUDIT -Message 'Scan completed' -Data @{ scanId = $scanId; findings = $findings.Count }
 
-    $scanResult = [pscustomobject]@{
-        scanId       = $scanId
-        subdomains   = [object[]]@($subs)
-        webServices  = [object[]]@($web)
-        threatIntel  = [object[]]@(ConvertTo-ETMObjectList $intelRows)
-        findings     = [object[]]@(ConvertTo-ETMObjectList $findings)
-        score        = $score
-    }
+    $scanResult = Normalize-ETMScanResult ([pscustomobject]@{
+            scanId      = $scanId
+            subdomains  = $subs
+            webServices = $web
+            threatIntel = $intelRows
+            findings    = $findings
+            score       = $score
+        })
     try {
         Save-ETMScanHistory -Result $scanResult -Scope $Scope
     }

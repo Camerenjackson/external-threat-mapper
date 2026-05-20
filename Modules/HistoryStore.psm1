@@ -253,18 +253,18 @@ function Save-ETMScanHistory {
     $scanId = [string]$Result.scanId
     if ([string]::IsNullOrWhiteSpace($scanId)) { $scanId = [guid]::NewGuid().ToString() }
 
-    $findings = ConvertTo-ETMObjectList $Result.findings
-    $intel = ConvertTo-ETMObjectList $Result.threatIntel
-    $score = $Result.score
+    $normalized = Normalize-ETMScanResult $Result
+    $findings = ConvertTo-ETMObjectList $normalized.findings
+    $score = $normalized.score
     $payload = [pscustomobject]@{
         scanId      = $scanId
         savedUtc    = (Get-Date).ToUniversalTime().ToString('o')
         scope       = $Scope
         score       = $score
-        findings    = $findings
-        subdomains  = (ConvertTo-ETMObjectList $Result.subdomains)
-        webServices = (ConvertTo-ETMObjectList $Result.webServices)
-        threatIntel = $intel
+        findings    = $normalized.findings
+        subdomains  = $normalized.subdomains
+        webServices = $normalized.webServices
+        threatIntel = $normalized.threatIntel
     }
     $file = Join-Path $histDir "$scanId.json"
     $payload | ConvertTo-Json -Depth 14 | Set-Content -Path $file -Encoding UTF8
