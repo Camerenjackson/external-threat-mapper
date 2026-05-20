@@ -51,6 +51,63 @@ function Publish-ETMLiveScanSnapshot {
     $LiveState.version = [int]$LiveState.version + 1
 }
 
+function Complete-ETMPartialScan {
+    param(
+        [Parameter(Mandatory)][string]$ScanId,
+        [Parameter(Mandatory)][psobject]$Scope,
+        $Findings,
+        $Subs,
+        $Web,
+        $Intel,
+        [string]$Status = 'Cancelled',
+        [scriptblock]$ProgressCallback
+    )
+    $findingsList = $Findings
+    if ($findingsList -isnot [System.Collections.IList]) {
+        $findingsList = ConvertTo-ETMObjectList $Findings
+    }
+    $subsArr = @(ConvertTo-ETMObjectArray $Subs)
+    $webArr = @(ConvertTo-ETMObjectArray $Web)
+    $intelArr = @(ConvertTo-ETMObjectArray $Intel)
+    $fa = ConvertTo-ETMObjectArray $findingsList
+    $score = $null
+    if ($fa.Count -gt 0 -or $subsArr.Count -gt 0 -or $webArr.Count -gt 0) {
+        $score = Measure-ETMProtectionScore -Findings $fa -Subdomains $subsArr -WebServices $webArr
+    }
+    if ($findingsList -is [System.Collections.IList]) {
+        foreach ($f in $findingsList) {
+            if ($f -and -not $f.PSObject.Properties['mitre']) {
+                $f | Add-Member -NotePropertyName mitre -NotePropertyValue (Get-ETMMitreMappingForFinding -Finding $f) -Force
+            }
+        }
+    }
+    if ($ProgressCallback) {
+        & $ProgressCallback 99 "Stopped - saving partial results ($($fa.Count) findings)..."
+    }
+    Write-ETMLog -Level AUDIT -Message 'Scan stopped (partial)' -Data @{
+        scanId   = $ScanId
+        status   = $Status
+        findings = $fa.Count
+        domain   = $Scope.primaryDomain
+    }
+    $scanResult = Normalize-ETMScanResult ([pscustomobject]@{
+            scanId     = $ScanId
+            subdomains = $subsArr
+            webServices = $webArr
+            threatIntel = $intelArr
+            findings   = $findingsList
+            score      = $score
+            scanStatus = $Status
+        })
+    try {
+        Save-ETMScanHistory -Result $scanResult -Scope $Scope
+    }
+    catch {
+        Write-ETMLog -Level WARN -Message 'Could not save partial scan history' -Data @{ error = $_.Exception.Message }
+    }
+    return $scanResult
+}
+
 function Start-ETMExternalScan {
     param(
         [Parameter(Mandatory)][psobject]$Scope,
@@ -61,6 +118,16 @@ function Start-ETMExternalScan {
     )
 
     $scanId = [guid]::NewGuid().ToString()
+    $web = @()
+    $intelRows = @()
+    $subs = @()
+
+    function Stop-IfCancelled {
+        param([string]$Phase)
+        if (-not (Test-ETMScanCancelled $CancelFlag)) { return $false }
+        return Complete-ETMPartialScan -ScanId $scanId -Scope $Scope -Findings $findings -Subs $subs `
+            -Web $web -Intel $intelRows -Status 'Cancelled' -ProgressCallback $ProgressCallback
+    }
     Write-ETMLog -Level AUDIT -Message 'Scan started' -Data @{ scanId = $scanId; domain = $Scope.primaryDomain; mode = $Scope.scanMode }
     Add-ETMScanRecord -ScanId $scanId -Scope $Scope -Status 'Running'
 
@@ -70,8 +137,11 @@ function Start-ETMExternalScan {
         -Web @() -Intel @() -Phase 'Scan started'
 
     & $ProgressCallback 5 'Discovering subdomains (passive, no API key required)...'
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     $subs = @(Invoke-ETMSubdomainDiscovery -Scope $Scope -Config $Config -CancelFlag $CancelFlag)
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     Add-ETMSubdomainRecords -ScanId $scanId -Records $subs
 
     foreach ($s in $subs | Where-Object { $_.riskScore -ge 50 }) {
@@ -91,7 +161,8 @@ function Start-ETMExternalScan {
         -Web @() -Intel @() -Phase 'Subdomains discovered'
 
     & $ProgressCallback 35 'Checking typosquat candidates...'
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $typos = @(Invoke-ETMTyposquatCheck -Domain $Scope.primaryDomain)
         foreach ($t in $typos) {
@@ -112,7 +183,8 @@ function Start-ETMExternalScan {
         -Web @() -Intel @() -Phase 'Typosquat check complete'
 
     & $ProgressCallback 55 'Cloud exposure indicators...'
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag) -and $Scope.scanMode -ne 'PassiveOnly') {
         $cloud = @(Invoke-ETMCloudExposureScan -Domain $Scope.primaryDomain)
         foreach ($c in $cloud) {
@@ -134,7 +206,8 @@ function Start-ETMExternalScan {
 
     & $ProgressCallback 65 'Threat intel (skipped if no API keys)...'
     $intelRows = @()
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
         $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips)
@@ -147,7 +220,8 @@ function Start-ETMExternalScan {
         -Web @() -Intel $intelRows -Phase 'Threat intel complete'
 
     & $ProgressCallback 75 'GitHub metadata search...'
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $ghToken = Get-ETMApiSecret -Name 'GitHub'
         $gh = @(Invoke-ETMGitHubExposureSearch -Domain $Scope.primaryDomain -Token $ghToken)
@@ -169,8 +243,8 @@ function Start-ETMExternalScan {
         -Web @() -Intel $intelRows -Phase 'GitHub search complete'
 
     & $ProgressCallback 85 'Safe web probing...'
-    $web = @()
-    if (Test-ETMScanCancelled $CancelFlag) { return $null }
+    $stopped = Stop-IfCancelled
+    if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
         $web = @(Invoke-ETMWebProbeBatch -Hostnames ($subs.hostname | Select-Object -First 15) -ScanMode $Scope.scanMode)
     }
@@ -205,4 +279,4 @@ function Start-ETMExternalScan {
     return $scanResult
 }
 
-Export-ModuleMember -Function 'Start-ETMExternalScan', 'Test-ETMScanCancelled', 'Publish-ETMLiveScanSnapshot'
+Export-ModuleMember -Function 'Start-ETMExternalScan', 'Test-ETMScanCancelled', 'Publish-ETMLiveScanSnapshot', 'Complete-ETMPartialScan'

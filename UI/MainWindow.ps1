@@ -52,6 +52,8 @@ function Show-ETMMainWindow {
         scanJob     = $null
         scanTimer   = $null
         cancelSync  = $null
+        activeScanScope = $null
+        activeScanLive  = $null
         sqlConnected = $false
         lastLiveVersion = -1
         discoveryRows = @()
@@ -229,29 +231,89 @@ function Show-ETMMainWindow {
         (& $get 'TxtProgressMsg').Text = ''
     }
 
-    function Stop-ActiveScan {
-        param([string]$Reason = 'Scan stopped.')
-        $state.cancelScan = $true
-        if ($state.cancelSync) { $state.cancelSync.Cancel = $true }
-        if ($state.scanTimer) {
-            try { $state.scanTimer.Stop() } catch { }
-            $state.scanTimer = $null
-        }
-        if ($state.scanJob) {
-            try {
-                Stop-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue
-                Remove-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue
-            }
-            catch { }
-            $state.scanJob = $null
-        }
+    function Complete-ScanUiAfterStop {
         $state.scanRunning = $false
+        $state.activeScanScope = $null
+        $state.activeScanLive = $null
         (& $get 'ScanProgress').Visibility = 'Collapsed'
         (& $get 'ScanProgress').Value = 0
         (& $get 'TxtProgressMsg').Visibility = 'Collapsed'
         (& $get 'BtnCancelScan').Visibility = 'Collapsed'
-        (& $get 'TxtStatus').Text = $Reason
-        Append-LogUi $Reason
+    }
+
+    function Invoke-ETMHardStopScan {
+        if (-not $state.scanRunning) { return }
+
+        $state.cancelScan = $true
+        if ($state.cancelSync) { $state.cancelSync.Cancel = $true }
+        (& $get 'TxtProgressMsg').Text = 'Stopping scan immediately...'
+        (& $get 'BtnCancelScan').IsEnabled = $false
+
+        if ($state.scanTimer) {
+            try { $state.scanTimer.Stop() } catch { }
+            $state.scanTimer = $null
+        }
+
+        $partialResult = $null
+        if ($state.scanJob) {
+            try {
+                Stop-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue
+                $partialResult = Receive-Job -Job $state.scanJob -ErrorAction SilentlyContinue
+            }
+            catch { }
+            try { Remove-Job -Job $state.scanJob -Force -ErrorAction SilentlyContinue } catch { }
+            $state.scanJob = $null
+        }
+
+        $scope = $state.activeScanScope
+        $live = $state.activeScanLive
+        $saved = $false
+
+        if (-not $partialResult -and $live -and $live.snapshot -and $scope) {
+            try {
+                $partialResult = Normalize-ETMScanResult $live.snapshot
+                $partialResult | Add-Member -NotePropertyName scanStatus -NotePropertyValue 'Cancelled' -Force
+                if (-not $partialResult.score) {
+                    $fa = ConvertTo-ETMObjectArray $partialResult.findings
+                    $sa = ConvertTo-ETMObjectArray $partialResult.subdomains
+                    $wa = ConvertTo-ETMObjectArray $partialResult.webServices
+                    if ($fa.Count -gt 0 -or $sa.Count -gt 0 -or $wa.Count -gt 0) {
+                        $partialResult | Add-Member -NotePropertyName score -NotePropertyValue (
+                            Measure-ETMProtectionScore -Findings $fa -Subdomains $sa -WebServices $wa) -Force
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if ($partialResult -and $scope) {
+            try {
+                if (-not $partialResult.PSObject.Properties['scanStatus']) {
+                    $partialResult | Add-Member -NotePropertyName scanStatus -NotePropertyValue 'Cancelled' -Force
+                }
+                Save-ETMScanHistory -Result $partialResult -Scope $scope
+                Update-UiSafe $partialResult -Context 'Save stopped scan'
+                $fc = (ConvertTo-ETMObjectList $partialResult.findings).Count
+                $sc = if ($partialResult.score) { $partialResult.score.TotalScore } else { '--' }
+                (& $get 'TxtStatus').Text = "Stopped - partial scan saved (score $sc, $fc findings)."
+                Append-LogUi "Hard stop: partial scan saved to history ($fc findings)."
+                Refresh-HistoryGrid
+                if ($state.sqlConnected) { Refresh-SqlGrid }
+                $saved = $true
+            }
+            catch {
+                Append-LogUi "Hard stop: save failed - $($_.Exception.Message)"
+                (& $get 'TxtStatus').Text = 'Scan stopped but could not save partial results.'
+            }
+        }
+
+        Complete-ScanUiAfterStop
+        (& $get 'BtnCancelScan').IsEnabled = $true
+
+        if (-not $saved) {
+            (& $get 'TxtStatus').Text = 'Scan stopped. No results to save yet (try again after findings appear).'
+            Append-LogUi 'Hard stop: job killed (no partial data to save).'
+        }
     }
 
     function Show-AuthorizationPrompt {
@@ -738,6 +800,8 @@ Do you confirm you are authorized to assess your targets?
         $prog = [hashtable]::Synchronized(@{ pct = 2; msg = 'Starting...' })
         $live = [hashtable]::Synchronized(@{ version = 0; snapshot = $null; phase = '' })
         $cancelSync = $state.cancelSync
+        $state.activeScanScope = $scope
+        $state.activeScanLive = $live
         $startJob = {
             param($Root, $Scope, $Config, $Cancel, $Prog, $Live)
             $ErrorActionPreference = 'Stop'
@@ -781,11 +845,6 @@ Do you confirm you are authorized to assess your targets?
                 $job = $state.scanJob
                 if (-not $job) { return }
 
-                if ($state.cancelScan -or ($state.cancelSync -and $state.cancelSync.Cancel)) {
-                    Stop-ActiveScan -Reason "Scan cancelled for $($scope.primaryDomain)."
-                    return
-                }
-
                 if ($job.State -eq 'Completed') {
                     $state.scanTimer.Stop()
                     $result = Receive-Job $job -ErrorAction SilentlyContinue
@@ -794,12 +853,15 @@ Do you confirm you are authorized to assess your targets?
                     $state.scanRunning = $false
                     (& $get 'ScanProgress').Value = 100
                     (& $get 'BtnCancelScan').Visibility = 'Collapsed'
+                    $state.activeScanScope = $null
+                    $state.activeScanLive = $null
                     if ($result) {
                         Update-UiSafe (Normalize-ETMScanResult $result) -Context 'Apply scan results'
                         $ic = (ConvertTo-ETMObjectList $result.threatIntel).Count
                         $fc = (ConvertTo-ETMObjectList $result.findings).Count
                         $sc = if ($result.score) { $result.score.TotalScore } else { '--' }
-                        (& $get 'TxtStatus').Text = "Complete - score $sc, $fc findings, $ic intel rows."
+                        $statusNote = if ($result.scanStatus -eq 'Cancelled') { 'Stopped (partial saved)' } else { 'Complete' }
+                        (& $get 'TxtStatus').Text = "$statusNote - score $sc, $fc findings, $ic intel rows."
                         Append-LogUi 'Scan finished.'
                         Refresh-HistoryGrid
                         if ($state.sqlConnected) { Refresh-SqlGrid }
@@ -811,27 +873,21 @@ Do you confirm you are authorized to assess your targets?
                     }
                 }
                 elseif ($job.State -in @('Failed', 'Stopped')) {
+                    if ($state.cancelScan) { return }
                     $state.scanTimer.Stop()
                     $err = (Receive-Job $job 2>&1 | Out-String).Trim()
                     Remove-Job $job -Force -ErrorAction SilentlyContinue
                     $state.scanJob = $null
-                    $state.scanRunning = $false
-                    (& $get 'BtnCancelScan').Visibility = 'Collapsed'
-                    if ($state.cancelScan) {
-                        (& $get 'TxtStatus').Text = 'Scan stopped.'
-                        Append-LogUi 'Scan stopped by user.'
-                    }
-                    else {
-                        Append-LogUi "Scan error: $err"
-                        (& $get 'TxtStatus').Text = 'Scan failed - see Reports log.'
-                        [System.Windows.MessageBox]::Show(
-                            "Scan failed.`n`n$err",
-                            'Scan', 'OK', 'Warning') | Out-Null
-                    }
+                    Complete-ScanUiAfterStop
+                    Append-LogUi "Scan error: $err"
+                    (& $get 'TxtStatus').Text = 'Scan failed - see Reports log.'
+                    [System.Windows.MessageBox]::Show(
+                        "Scan failed.`n`n$err",
+                        'Scan', 'OK', 'Warning') | Out-Null
                 }
             }
             catch {
-                Stop-ActiveScan -Reason 'Scan interrupted due to an error.'
+                Complete-ScanUiAfterStop
                 Show-ETMUiError -Context 'Scan progress' -Exception $_.Exception -OnLog $uiLog
             }
         })
@@ -839,8 +895,7 @@ Do you confirm you are authorized to assess your targets?
     }
 
     Register-ETMUiClick -Control (& $get 'BtnCancelScan') -Context 'Cancel scan' -OnLog $uiLog -Handler {
-        if (-not $state.scanRunning) { return }
-        Stop-ActiveScan -Reason 'Stopping scan...'
+        Invoke-ETMHardStopScan
     }
 
     Register-ETMUiClick -Control (& $get 'BtnExportHtml') -Context 'Export HTML' -OnLog $uiLog -Handler {

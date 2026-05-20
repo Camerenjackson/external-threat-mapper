@@ -256,9 +256,11 @@ function Save-ETMScanHistory {
     $normalized = Normalize-ETMScanResult $Result
     $findings = ConvertTo-ETMObjectList $normalized.findings
     $score = $normalized.score
+    $scanStatus = if ($Result.scanStatus) { [string]$Result.scanStatus } else { 'Completed' }
     $payload = [pscustomobject]@{
         scanId      = $scanId
         savedUtc    = (Get-Date).ToUniversalTime().ToString('o')
+        scanStatus  = $scanStatus
         scope       = $Scope
         score       = $score
         findings    = $normalized.findings
@@ -279,6 +281,7 @@ function Save-ETMScanHistory {
             domain       = $Scope.primaryDomain
             organization = $Scope.organizationName
             scanMode     = $Scope.scanMode
+            status       = $scanStatus
             startedUtc   = $payload.savedUtc
             totalScore   = if ($score) { $score.TotalScore } else { 0 }
             findingCount = $findings.Count
