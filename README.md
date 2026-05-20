@@ -18,7 +18,6 @@
 
 > **Authorized assessments only.** Use on targets you own or are permitted to test.
 
-**Repository:** [github.com/Camerenjackson/external-threat-mapper](https://github.com/Camerenjackson/external-threat-mapper)
 
 ## Features
 
