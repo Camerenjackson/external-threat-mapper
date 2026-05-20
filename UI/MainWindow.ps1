@@ -405,8 +405,23 @@ Do you confirm you are authorized to assess your targets?
         $status.TextWrapping = 'Wrap'
         $status.Foreground = '#7D8DA6'
         $status.FontSize = 11
-        if ($existing) { $status.Text = 'Key configured (hidden).' }
         $providerId = $Provider.id
+        if ($providerId -ne 'CensysSecret') {
+            if (Test-ETMApiConfigured -Provider $providerId) {
+                $status.Text = 'Ready for scans (key on file).'
+                $status.Foreground = New-ETMUiBrush '#3DD68C'
+            }
+            else {
+                $status.Text = 'Not configured - this provider is skipped during scans.'
+            }
+        }
+        elseif (Test-ETMApiConfigured -Provider 'Censys') {
+            $status.Text = 'Censys ID + secret on file (ready).'
+            $status.Foreground = New-ETMUiBrush '#3DD68C'
+        }
+        else {
+            $status.Text = 'Save with Censys API ID to enable Censys.'
+        }
         $logFn = { param($line) Append-LogUi $line }
         Register-ETMUiClick -Control $btnSave -Context "Save API $providerId" -OnLog $logFn -Handler {
             $sec = $pwd.SecurePassword
@@ -425,7 +440,9 @@ Do you confirm you are authorized to assess your targets?
                 [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
                 $pwd.Clear()
             }
-            $status.Text = 'Saved securely.'
+            $status.Text = if (Test-ETMApiConfigured -Provider $providerId) {
+                'Saved - ready for scans.'
+            } else { 'Saved securely.' }
             $status.Foreground = New-ETMUiBrush '#3DD68C'
             Append-LogUi "API key saved: $providerId"
         }.GetNewClosure()
@@ -736,7 +753,8 @@ Do you confirm you are authorized to assess your targets?
     }
 
     Register-ETMUiClick -Control (& $get 'BtnTestAllApis') -Context 'Test all API integrations' -OnLog $uiLog -Handler {
-        (& $get 'TxtApiSummary').Text = 'Testing all providers...'
+        $ready = Get-ETMConfiguredApiLabel
+        (& $get 'TxtApiSummary').Text = "Testing providers... (keys on file: $ready)"
         $results = @(Test-ETMAllApiConnections)
         if ($results.Count -eq 0) {
             (& $get 'TxtApiSummary').Text = 'No integrations configured.'
@@ -786,9 +804,15 @@ Do you confirm you are authorized to assess your targets?
         (& $get 'TxtProgressMsg').Visibility = 'Visible'
         (& $get 'BtnCancelScan').Visibility = 'Visible'
         (& $get 'ScanProgress').Value = 2
-        (& $get 'TxtProgressMsg').Text = 'Starting scan (API keys optional for basic checks)...'
+        $apiLabel = Get-ETMConfiguredApiLabel
+        $apiHint = if ($apiLabel -eq 'none') {
+            'No API keys - DNS/certificate checks only.'
+        } else {
+            "Using APIs: $apiLabel"
+        }
+        (& $get 'TxtProgressMsg').Text = "Starting scan - $apiHint"
         (& $get 'TxtStatus').Text = "Scanning $($scope.primaryDomain)..."
-        Append-LogUi "Scan started [$($scope.scanMode)]. Basic checks work without API keys."
+        Append-LogUi "Scan started [$($scope.scanMode)]. $apiHint"
         Show-Page 'Dashboard'
         $state.lastLiveVersion = -1
         (& $get 'TxtScore').Text = '...'

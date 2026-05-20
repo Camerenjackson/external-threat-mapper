@@ -58,7 +58,8 @@ powershell -File .\Scripts\Test-ETMCore.ps1
 
 | Situation | What to do |
 |-----------|----------------|
-| No API keys | **Run scan** still works (DNS, certificate transparency, typosquat checks). |
-| Some keys | Add them under **Integrations**; missing providers are skipped. |
+| No API keys | **Run scan** still works (DNS, certificate transparency, typosquat). Threat intel APIs are skipped. |
+| Some keys (e.g. Shodan + VirusTotal only) | Only those providers run; all others are skipped automatically. |
+| Integrations tab | Green **Ready for scans** = key on file; grey = skipped on the next scan. |
 | SQL at work | **SQL Database** → **Connect** → enable auto-sync. |
 | Demo / training | **Demo** loads sample data; **Clear** resets the dashboard. |

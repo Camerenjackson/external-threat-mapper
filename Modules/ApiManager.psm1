@@ -99,6 +99,54 @@ function Set-ETMApiCredential {
     Write-ETMLog -Level AUDIT -Message 'API credential updated' -Data @{ name = $Name }
 }
 
+$script:ETMThreatIntelProviderIds = @(
+    'Shodan', 'VirusTotal', 'SecurityTrails', 'Censys', 'Urlscan',
+    'AlienVaultOTX', 'AbuseIPDB', 'GreyNoise', 'HIBP'
+)
+
+function Test-ETMApiConfigured {
+    <#
+    .SYNOPSIS
+    True when a provider has credentials saved (or env var) and is ready to call.
+    #>
+    param([Parameter(Mandatory)][string]$Provider)
+    if ($Provider -eq 'CensysSecret') { return $false }
+    if ($Provider -eq 'Censys') {
+        return -not [string]::IsNullOrWhiteSpace((Get-ETMApiSecret -Name 'Censys')) `
+            -and -not [string]::IsNullOrWhiteSpace((Get-ETMApiSecret -Name 'CensysSecret'))
+    }
+    return -not [string]::IsNullOrWhiteSpace((Get-ETMApiSecret -Name $Provider))
+}
+
+function Get-ETMConfiguredApiProviders {
+    <#
+    .SYNOPSIS
+    Returns provider IDs that have keys configured and can be used on the next scan.
+    #>
+    param([string[]]$ProviderIds)
+    if (-not $ProviderIds) {
+        $ProviderIds = $script:ETMThreatIntelProviderIds + @('GitHub')
+    }
+    $list = [System.Collections.Generic.List[string]]::new()
+    foreach ($id in $ProviderIds) {
+        if ($id -eq 'CensysSecret') { continue }
+        if (Test-ETMApiConfigured -Provider $id) { [void]$list.Add($id) }
+    }
+    return ,@($list.ToArray())
+}
+
+function Get-ETMConfiguredApiLabel {
+    param([string[]]$ProviderIds)
+    $ids = @(Get-ETMConfiguredApiProviders -ProviderIds $ProviderIds)
+    if ($ids.Count -eq 0) { return 'none' }
+    $catalog = Get-ETMIntegrationCatalog
+    $names = foreach ($id in $ids) {
+        $e = $catalog | Where-Object { $_.id -eq $id } | Select-Object -First 1
+        if ($e) { $e.displayName } else { $id }
+    }
+    return ($names -join ', ')
+}
+
 function Get-ETMApiSecret {
     param([Parameter(Mandatory)][string]$Name)
     foreach ($en in (Get-ETMProviderEnvVars -Name $Name)) {
@@ -253,6 +301,7 @@ function Test-ETMAllApiConnections {
 
 Export-ModuleMember -Function @(
     'Protect-ETMSecret', 'Unprotect-ETMSecret', 'Get-ETMApiCredentials', 'Set-ETMApiCredential',
-    'Get-ETMApiSecret', 'Test-ETMApiConnection', 'Test-ETMAllApiConnections', 'Invoke-ETMGitHubApi',
+    'Get-ETMApiSecret', 'Test-ETMApiConfigured', 'Get-ETMConfiguredApiProviders', 'Get-ETMConfiguredApiLabel',
+    'Test-ETMApiConnection', 'Test-ETMAllApiConnections', 'Invoke-ETMGitHubApi',
     'Test-ETMContainerMode', 'Get-ETMIntegrationCatalog', 'Get-ETMProviderEnvVars'
 )

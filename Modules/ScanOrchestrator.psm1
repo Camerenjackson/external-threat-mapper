@@ -204,16 +204,27 @@ function Start-ETMExternalScan {
     Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
         -Web @() -Intel @() -Phase 'Cloud checks complete'
 
-    & $ProgressCallback 65 'Threat intel (skipped if no API keys)...'
+    $configuredApis = @(Get-ETMConfiguredApiProviders)
+    $apiNames = Get-ETMConfiguredApiLabel
     $intelRows = @()
     $stopped = Stop-IfCancelled
     if ($stopped) { return $stopped }
-    if (-not (Test-ETMScanCancelled $CancelFlag)) {
-        $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
-        $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips)
-        if ($intelRows -and $intelRows.Count -gt 0) {
-            $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows @($intelRows))
-            foreach ($f in $intelFindings) { $findings.Add($f) }
+
+    if ($configuredApis.Count -eq 0) {
+        & $ProgressCallback 65 'Threat intel skipped (no API keys configured)'
+        Write-ETMLog -Level INFO -Message 'Threat intel phase skipped' -Data @{
+            scanMode = $Scope.scanMode; reason = 'No configured APIs'
+        }
+    }
+    else {
+        & $ProgressCallback 65 "Threat intel via: $apiNames..."
+        if (-not (Test-ETMScanCancelled $CancelFlag)) {
+            $ips = @($subs | ForEach-Object { $_.ip } | Where-Object { $_ })
+            $intelRows = @(Invoke-ETMThreatIntelEnrichment -Domain $Scope.primaryDomain -Ips $ips -ScanMode $Scope.scanMode)
+            if ($intelRows -and $intelRows.Count -gt 0) {
+                $intelFindings = @(Convert-ETMThreatIntelToFindings -IntelRows @($intelRows))
+                foreach ($f in $intelFindings) { $findings.Add($f) }
+            }
         }
     }
     Publish-ETMLiveScanSnapshot -LiveState $LiveState -ScanId $scanId -Findings $findings -Subs $subs `
@@ -223,8 +234,13 @@ function Start-ETMExternalScan {
     $stopped = Stop-IfCancelled
     if ($stopped) { return $stopped }
     if (-not (Test-ETMScanCancelled $CancelFlag)) {
-        $ghToken = Get-ETMApiSecret -Name 'GitHub'
-        $gh = @(Invoke-ETMGitHubExposureSearch -Domain $Scope.primaryDomain -Token $ghToken)
+        if (Test-ETMApiConfigured -Provider 'GitHub') {
+            $gh = @(Invoke-ETMGitHubExposureSearch -Domain $Scope.primaryDomain -Token (Get-ETMApiSecret -Name 'GitHub'))
+        }
+        else {
+            $gh = @()
+            Write-ETMLog -Level INFO -Message 'GitHub search skipped' -Data @{ reason = 'No GitHub token configured' }
+        }
         foreach ($g in $gh) {
             $findings.Add([pscustomobject]@{
                     title = "GitHub code reference: $($g.repository)"

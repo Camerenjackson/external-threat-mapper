@@ -220,37 +220,63 @@ function Invoke-ETMThreatIntelEnrichment {
     param(
         [Parameter(Mandatory)][string]$Domain,
         [string[]]$Ips = @(),
-        [int]$MaxIpLookups = 3
+        [int]$MaxIpLookups = 3,
+        [ValidateSet('PassiveOnly', 'CorporateSafe', 'FullAuthorized')]
+        [string]$ScanMode = 'PassiveOnly'
     )
     $all = [System.Collections.Generic.List[object]]::new()
+    $configured = @(Get-ETMConfiguredApiProviders -ProviderIds $(
+        'Shodan', 'VirusTotal', 'SecurityTrails', 'Censys', 'Urlscan',
+        'AlienVaultOTX', 'AbuseIPDB', 'GreyNoise', 'HIBP'))
 
-    $shodan = Get-ETMApiSecret -Name 'Shodan'
-    $all.AddRange(@(Invoke-ETMShodanDomainIntel -Domain $Domain -ApiKey $shodan))
+    if ($configured.Count -eq 0) {
+        Write-ETMLog -Level INFO -Message 'Threat intel skipped' -Data @{
+            domain = $Domain; scanMode = $ScanMode; reason = 'No API keys configured'
+        }
+        return ,@()
+    }
 
-    $vt = Get-ETMApiSecret -Name 'VirusTotal'
-    $all.AddRange(@(Invoke-ETMVirusTotalDomainIntel -Domain $Domain -ApiKey $vt))
+    Write-ETMLog -Level INFO -Message 'Threat intel providers' -Data @{
+        domain    = $Domain
+        scanMode  = $ScanMode
+        providers = ($configured -join ',')
+    }
 
-    $st = Get-ETMApiSecret -Name 'SecurityTrails'
-    $all.AddRange(@(Invoke-ETMSecurityTrailsDomainIntel -Domain $Domain -ApiKey $st))
+    if ($configured -contains 'Shodan') {
+        $all.AddRange(@(Invoke-ETMShodanDomainIntel -Domain $Domain -ApiKey (Get-ETMApiSecret -Name 'Shodan')))
+    }
+    if ($configured -contains 'VirusTotal') {
+        $all.AddRange(@(Invoke-ETMVirusTotalDomainIntel -Domain $Domain -ApiKey (Get-ETMApiSecret -Name 'VirusTotal')))
+    }
+    if ($configured -contains 'SecurityTrails') {
+        $all.AddRange(@(Invoke-ETMSecurityTrailsDomainIntel -Domain $Domain -ApiKey (Get-ETMApiSecret -Name 'SecurityTrails')))
+    }
+    if ($configured -contains 'Censys') {
+        $all.AddRange(@(Invoke-ETMCensysDomainIntel -Domain $Domain `
+                -ApiId (Get-ETMApiSecret -Name 'Censys') `
+                -ApiSecret (Get-ETMApiSecret -Name 'CensysSecret')))
+    }
+    if ($configured -contains 'Urlscan') {
+        $all.AddRange(@(Invoke-ETMUrlscanDomainIntel -Domain $Domain -ApiKey (Get-ETMApiSecret -Name 'Urlscan')))
+    }
+    if ($configured -contains 'AlienVaultOTX') {
+        $all.AddRange(@(Invoke-ETMOtxDomainIntel -Domain $Domain -ApiKey (Get-ETMApiSecret -Name 'AlienVaultOTX')))
+    }
 
-    $cId = Get-ETMApiSecret -Name 'Censys'
-    $cSec = Get-ETMApiSecret -Name 'CensysSecret'
-    $all.AddRange(@(Invoke-ETMCensysDomainIntel -Domain $Domain -ApiId $cId -ApiSecret $cSec))
-
-    $urlscan = Get-ETMApiSecret -Name 'Urlscan'
-    $all.AddRange(@(Invoke-ETMUrlscanDomainIntel -Domain $Domain -ApiKey $urlscan))
-
-    $otx = Get-ETMApiSecret -Name 'AlienVaultOTX'
-    $all.AddRange(@(Invoke-ETMOtxDomainIntel -Domain $Domain -ApiKey $otx))
-
-    $abuse = Get-ETMApiSecret -Name 'AbuseIPDB'
-    $grey = Get-ETMApiSecret -Name 'GreyNoise'
     $ipList = @($Ips | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -Unique -First $MaxIpLookups)
-    foreach ($ip in $ipList) {
-        Start-Sleep -Milliseconds 400
-        $all.AddRange(@(Invoke-ETMAbuseIPDBIntel -Ip $ip -ApiKey $abuse))
-        Start-Sleep -Milliseconds 400
-        $all.AddRange(@(Invoke-ETMGreyNoiseIpIntel -Ip $ip -ApiKey $grey))
+    if ($ipList.Count -gt 0) {
+        $useAbuse = $configured -contains 'AbuseIPDB'
+        $useGrey = $configured -contains 'GreyNoise'
+        foreach ($ip in $ipList) {
+            if ($useAbuse) {
+                Start-Sleep -Milliseconds 400
+                $all.AddRange(@(Invoke-ETMAbuseIPDBIntel -Ip $ip -ApiKey (Get-ETMApiSecret -Name 'AbuseIPDB')))
+            }
+            if ($useGrey) {
+                Start-Sleep -Milliseconds 400
+                $all.AddRange(@(Invoke-ETMGreyNoiseIpIntel -Ip $ip -ApiKey (Get-ETMApiSecret -Name 'GreyNoise')))
+            }
+        }
     }
 
     return ,@($all.ToArray())
