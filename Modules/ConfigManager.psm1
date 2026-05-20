@@ -148,32 +148,43 @@ function Set-ETMDataGridSource {
 }
 
 function ConvertTo-ETMObjectArray {
+    <#
+    .SYNOPSIS
+    Returns a PowerShell array safe on 5.1 (do not use New-Object object[] - it throws).
+    #>
     param($InputObject)
     $list = ConvertTo-ETMObjectList $InputObject
     if ($list.Count -eq 0) { return @() }
-    $arr = New-Object object[] $list.Count
-    for ($i = 0; $i -lt $list.Count; $i++) { $arr[$i] = $list[$i] }
-    return $arr
+    return @($list.ToArray())
 }
 
 function Normalize-ETMScanResult {
     <#
     .SYNOPSIS
-    Forces scan payload arrays so JSON/history/job results never unwrap to a single object.
+    Normalizes scan payloads for UI/history. Collections stored as ArrayList to avoid single-item unwrap.
     #>
     param($Result)
     if (-not $Result) { return $null }
-    $out = [pscustomobject]@{
+
+    $findings = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Result.findings)) { [void]$findings.Add($x) }
+    $subs = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Result.subdomains)) { [void]$subs.Add($x) }
+    $web = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Result.webServices)) { [void]$web.Add($x) }
+    $intel = New-Object System.Collections.ArrayList
+    foreach ($x in (ConvertTo-ETMObjectList $Result.threatIntel)) { [void]$intel.Add($x) }
+
+    return [pscustomobject]@{
         scanId      = $Result.scanId
         score       = $Result.score
         scope       = $Result.scope
         savedUtc    = $Result.savedUtc
-        findings    = ConvertTo-ETMObjectArray $Result.findings
-        subdomains  = ConvertTo-ETMObjectArray $Result.subdomains
-        webServices = ConvertTo-ETMObjectArray $Result.webServices
-        threatIntel = ConvertTo-ETMObjectArray $Result.threatIntel
+        findings    = $findings
+        subdomains  = $subs
+        webServices = $web
+        threatIntel = $intel
     }
-    return $out
 }
 
 function Import-ETMScanResultJson {

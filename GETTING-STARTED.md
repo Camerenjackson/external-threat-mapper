@@ -44,6 +44,21 @@ Output: `dist\ExternalThreatMapper.exe`
 
 ## SQL (optional)
 
-**History** tab → right panel → enable SQL, enter server/database → **Save** → **Test**.
+**SQL Database** tab → enter server and database → **Connect** → unlock sync tools.
 
-Local history always saves even if SQL is off.
+**History** tab → local scans only (`data\history\`). Use **Load selected** to reopen a past scan.
+
+## Verify install (no GUI)
+
+```powershell
+powershell -File .\Scripts\Test-ETMCore.ps1
+```
+
+## At home vs at work
+
+| Situation | What to do |
+|-----------|----------------|
+| No API keys | **Run scan** still works (DNS, certificate transparency, typosquat checks). |
+| Some keys | Add them under **Integrations**; missing providers are skipped. |
+| SQL at work | **SQL Database** → **Connect** → enable auto-sync. |
+| Demo / training | **Demo** loads sample data; **Clear** resets the dashboard. |

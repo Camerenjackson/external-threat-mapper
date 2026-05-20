@@ -149,8 +149,10 @@ function Show-ETMMainWindow {
         $intel = ConvertTo-ETMObjectList $result.threatIntel
         $score = $result.score
         if (-not $score -and $findings.Count -gt 0) {
-            $score = Measure-ETMProtectionScore -Findings $findings.ToArray() `
-                -Subdomains $subs.ToArray() -WebServices $web.ToArray()
+            $score = Measure-ETMProtectionScore `
+                -Findings (ConvertTo-ETMObjectArray $findings) `
+                -Subdomains (ConvertTo-ETMObjectArray $subs) `
+                -WebServices (ConvertTo-ETMObjectArray $web)
             $result | Add-Member -NotePropertyName score -NotePropertyValue $score -Force
         }
         if ($score) {
@@ -164,6 +166,21 @@ function Show-ETMMainWindow {
         Set-ETMDataGridSource -Grid (& $get 'GridIntel') -Items $intel
         $state.discoveryRows = Build-DiscoveryRows $result
         Apply-DiscoveryFilter
+    }
+
+    function Update-UiSafe {
+        param(
+            $Result,
+            [string]$Context = 'Update dashboard'
+        )
+        try {
+            Update-Ui $Result
+        }
+        catch {
+            Show-ETMUiError -Context $Context -Exception $_.Exception -OnLog $uiLog
+            return $false
+        }
+        return $true
     }
 
     function Reset-DashboardUi {
@@ -414,7 +431,7 @@ Do you confirm authorization?
             $scanId = [string]$last.scanId
             if ([string]::IsNullOrWhiteSpace($scanId)) { return }
             $loaded = Import-ETMScanFromHistory -ScanId $scanId
-            Update-Ui $loaded
+            Update-UiSafe $loaded -Context 'Restore last scan'
             $state.isDemo = $false
             (& $get 'TxtStatus').Text = "Restored last scan: $($last.domain) ($($last.startedUtc))"
             Append-LogUi "Restored history: $($last.domain)"
@@ -464,9 +481,9 @@ Do you confirm authorization?
             [System.Windows.MessageBox]::Show('Demo file missing.', 'Demo') | Out-Null
             return
         }
-        $demo = Normalize-ETMScanResult (Import-ETMScanResultJson -Path $demoPath)
+        $demo = Import-ETMScanResultJson -Path $demoPath
         $state.isDemo = $true
-        Update-Ui $demo
+        if (-not (Update-UiSafe $demo -Context 'Load demo data')) { return }
         (& $get 'TxtOrg').Text = 'Demo Corp'
         (& $get 'TxtDomain').Text = 'demo-corp.example'
         (& $get 'ChkAuthorized').IsChecked = $true
@@ -493,7 +510,7 @@ Do you confirm authorization?
         }
         $loaded = Import-ETMScanFromHistory -ScanId $id
         $state.isDemo = $false
-        Update-Ui $loaded
+        if (-not (Update-UiSafe $loaded -Context 'Load history scan')) { return }
         if ($loaded.scope) {
             if ($loaded.scope.organizationName) { (& $get 'TxtOrg').Text = [string]$loaded.scope.organizationName }
             if ($loaded.scope.primaryDomain) { (& $get 'TxtDomain').Text = [string]$loaded.scope.primaryDomain }
@@ -699,7 +716,7 @@ Do you confirm authorization?
                     (& $get 'ScanProgress').Value = 100
                     (& $get 'BtnCancelScan').Visibility = 'Collapsed'
                     if ($result) {
-                        Update-Ui (Normalize-ETMScanResult $result)
+                        Update-UiSafe (Normalize-ETMScanResult $result) -Context 'Apply scan results'
                         $ic = (ConvertTo-ETMObjectList $result.threatIntel).Count
                         $fc = (ConvertTo-ETMObjectList $result.findings).Count
                         $sc = if ($result.score) { $result.score.TotalScore } else { '--' }
@@ -760,7 +777,7 @@ Do you confirm authorization?
     Register-ETMUiClick -Control (& $get 'BtnExportCsv') -Context 'Export CSV' -OnLog $uiLog -Handler {
         if (-not $state.lastResult) { return }
         $out = Join-Path (Get-ETMProjectRoot) "reports\etm-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
-        $findings = (ConvertTo-ETMObjectList $state.lastResult.findings).ToArray()
+        $findings = ConvertTo-ETMObjectArray $state.lastResult.findings
         Export-ETMFindingsCsv -Findings $findings -OutputPath $out
         [System.Windows.MessageBox]::Show("Saved:`n$out", 'Export') | Out-Null
     }
