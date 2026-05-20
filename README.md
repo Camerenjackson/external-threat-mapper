@@ -1,7 +1,7 @@
 # External Threat Mapper
 
 <p align="center">
-  <img src="docs/screenshots/social-preview.png" alt="External Threat Mapper dashboard preview" width="720"/>
+  <img src="docs/screenshots/app-icon.png" alt="External Threat Mapper logo" width="128"/>
 </p>
 
 <p align="center">
@@ -12,26 +12,53 @@
 </p>
 
 <p align="center">
-  <strong>Defensive external attack surface dashboard</strong><br/>
-  PowerShell + WPF · optional API enrichment · local history + SQL sync
+  <strong>Defensive external attack surface dashboard for Windows</strong><br/>
+  Map what is exposed on the internet · enrich with threat-intel APIs · keep results local
 </p>
 
 > **Authorized assessments only.** Use on targets you own or are permitted to test.
 
 
-## Features
+---
 
-- Modern sidebar UI (Dashboard, Target, Discovery, Threat Intel, Integrations, History, Reports)
-- Passive / safe scan modes
-- API integrations: Shodan, VirusTotal, SecurityTrails, Censys, urlscan.io, AbuseIPDB, GreyNoise, OTX, GitHub, HIBP
-- **Where to find API key** hints under each integration
-- API-assisted subdomain discovery (Shodan DNS + SecurityTrails) and IP cascade enrichment
-- HIBP organizational breach exposure (verified domains + optional seed emails)
-- Auto-saved scan history in `data/history/`
-- Optional **SQL Server** sync
-- GUI + command-line modes
-- Windows `.exe` build via PyInstaller
-- Docker headless scan + HTTP API (optional)
+## See it in action
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-screenshot.png" alt="External Threat Mapper dashboard — score cards, findings table, and sidebar navigation" width="920"/>
+</p>
+
+<p align="center"><em>
+  Dashboard view: risk score, findings/assets counts, and drill-down tables — double-click any row for full detail.
+</em></p>
+
+---
+
+## What you get
+
+| | |
+|---|---|
+| **One-click scans** | Run passive or corporate-safe scans from the GUI or PowerShell CLI |
+| **Live dashboard** | Score, findings, discovered assets, and intel feed counts at a glance |
+| **Deep detail** | Double-click rows for severity, evidence, MITRE mapping, and remediation hints |
+| **API enrichment** | Shodan, VirusTotal, SecurityTrails, Censys, urlscan, AbuseIPDB, GreyNoise, OTX, GitHub, HIBP |
+| **Breach exposure** | HIBP domain search (verified org domains) plus optional seed-email checks |
+| **Discovery pipeline** | CT logs, DNS, web probes, and API-assisted subdomain merge |
+| **History & reports** | Auto-saved scans under `data/history/` and exportable JSON reports |
+| **Enterprise options** | DPAPI-protected API keys, optional SQL Server sync, Docker headless mode |
+
+### Navigation at a glance
+
+| Tab | Purpose |
+|-----|---------|
+| **Dashboard** | Run/stop scans, score card, findings & assets grids |
+| **Target** | Organization, domain scope, authorization, scan mode |
+| **Discovery** | Subdomains, certificates, and discovered hosts |
+| **Threat Intel** | Aggregated reputation and exposure from configured APIs |
+| **Integrations** | API keys with built-in “where to find key” guidance |
+| **History** | Reload and compare past assessments |
+| **Reports** | Export results for stakeholders |
+
+---
 
 ## Quick start
 
@@ -46,13 +73,13 @@ See [GETTING-STARTED.md](GETTING-STARTED.md) for a plain-language walkthrough.
 
 ## API keys (never committed)
 
-Keys are stored locally only:
+Keys stay on your machine only:
 
-- **GUI:** Integrations tab (DPAPI-protected under `credentials/`)
+- **GUI:** Integrations tab → stored under `credentials/` (DPAPI-protected)
 - **Environment:** `ETM_*` variables (see `config/integrations.json`)
 - **Docker:** copy `docker/.env.example` → `docker/.env`
 
-Copy `config/config.example.json` → `config/config.json` for scan settings. These paths are in `.gitignore`.
+Copy `config/config.example.json` → `config/config.json` for scan settings. These paths are listed in `.gitignore`.
 
 ## Requirements
 
